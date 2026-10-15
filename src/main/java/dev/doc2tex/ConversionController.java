@@ -53,6 +53,16 @@ class ConversionController {
     }
     @GetMapping("/jobs/{id}/review") DocumentInspector.Review review(@PathVariable String id) { return service.review(id); }
 
+    @GetMapping("/jobs/{id}/caption-repairs")
+    CaptionRepairs.Plan captionRepairs(@PathVariable String id) throws IOException { return service.captionRepairs(id); }
+
+    record CaptionRepairRequest(@NotNull @PositiveOrZero Integer revision, @NotBlank @Size(max = 64) String sourceHash,
+                                @jakarta.validation.constraints.NotEmpty @Size(max = 100) java.util.List<@NotBlank String> proposalIds) {}
+    @PostMapping("/jobs/{id}/caption-repairs")
+    ConversionService.RestoredDocument applyCaptionRepairs(@PathVariable String id, @Valid @RequestBody CaptionRepairRequest request) throws IOException {
+        return service.applyCaptionRepairs(id, request.revision(), request.sourceHash(), request.proposalIds());
+    }
+
     record ReviewDecision(@NotNull @PositiveOrZero Integer revision, @NotBlank String status, @NotBlank String fingerprint) {}
     @PutMapping("/jobs/{id}/review/decisions/{findingId}")
     DocumentInspector.Review decide(@PathVariable String id, @PathVariable String findingId, @Valid @RequestBody ReviewDecision decision) throws IOException {

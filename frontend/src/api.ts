@@ -70,6 +70,9 @@ export interface ReviewDecision {
   applicable: boolean; carried: boolean; applicableRevision: number; reason: string
 }
 
+export interface CaptionProposal { id: string; title: string; line: number; start: number; end: number; before: string; after: string }
+export interface CaptionRepairPlan { revision: number; sourceHash: string; proposals: CaptionProposal[]; warnings: string[] }
+
 export interface CompilerDiagnostic {
   severity: 'error' | 'warning'
   code: string

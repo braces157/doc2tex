@@ -111,5 +111,31 @@
     "pdfLastPageMustContain": [
       "PRESERVE_LARGE_FINISH"
     ]
+  },
+  {
+    "file": "caption-references.docx",
+    "mustContain": [
+      "PRESERVE_REFERENCE_START",
+      "PRESERVE_REFERENCE_TABLE",
+      "PRESERVE_REFERENCE_PROSE",
+      "PRESERVE_REFERENCE_FINISH"
+    ],
+    "features": [
+      "numbered captions",
+      "repeated caption text",
+      "Word bookmarks",
+      "simple and complex REF fields",
+      "PAGEREF",
+      "unresolved and detached references"
+    ],
+    "previewExpected": "caption and reference review required",
+    "pdfMustContain": [
+      "PRESERVE_REFERENCE_START",
+      "PRESERVE_REFERENCE_TABLE",
+      "PRESERVE_REFERENCE_PROSE",
+      "PRESERVE_REFERENCE_FINISH"
+    ],
+    "pdfMustNotContain": [],
+    "pdfMinPages": 1
   }
 ]

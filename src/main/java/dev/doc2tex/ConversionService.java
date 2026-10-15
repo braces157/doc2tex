@@ -91,11 +91,13 @@ class ConversionService {
             Path directory = store.directory(id);
             Path output = directory.resolve("output");
             Files.createDirectories(output);
+            Path conversionInput = WordReferenceSupport.prepare(directory.resolve("input.docx"), directory, output);
             List<String> command = new ArrayList<>(List.of(tools.pandoc(), "--sandbox", "--from=docx", "--to=latex",
                     "--standalone", "--wrap=none", "--track-changes=accept", "--extract-media=media", "--metadata=date:",
                     "--variable=documentclass:" + job.template(), "--variable=geometry:margin=1in",
-                    "--output=main.tex", directory.resolve("input.docx").toString()));
+                    "--output=main.tex", conversionInput.toString()));
             fonts.prepare(inspector.review(directory.resolve("input.docx"), null), output, command);
+            WordReferenceSupport.configure(command);
             ToolRunner.Result result = runner.run(command, output, directory.resolve("conversion.log"),
                     properties.conversionTimeoutSeconds());
             if (result.exitCode() != 0 || !Files.isRegularFile(output.resolve("main.tex"))) {
@@ -262,6 +264,9 @@ class ConversionService {
         Path directory = store.directory(id);
         Path log = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
         var detected = inspector.review(directory.resolve("input.docx"), log);
+        var findings = new ArrayList<>(detected.findings());
+        var referenceWarnings = WordReferenceSupport.warnings(directory.resolve("input.docx"), directory.resolve("output"));
+        if (!referenceWarnings.isEmpty()) findings.add(new DocumentInspector.Finding("references", "warning", "References need manual review", String.join(" ", referenceWarnings.stream().limit(8).toList())));
         String source = null;
         if (job.status().equals("COMPLETED")) try {
             store.requireHistory(id);
@@ -271,7 +276,7 @@ class ConversionService {
         List<ReviewDecisions.Decision> decisions = List.of(); String decisionError = "";
         try { decisions = ReviewDecisions.apply(ReviewDecisions.load(directory), evidence.items(), job.revision()); }
         catch (IOException | RuntimeException exception) { decisionError = "Saved review decisions could not be read. Back up this project's storage before repairing review-decisions.json. Detected risks and original text remain available."; }
-        return new DocumentInspector.Review(detected.elements(), detected.findings(), detected.compilerWarnings(), detected.scripts(), detected.scope(),
+        return new DocumentInspector.Review(detected.elements(), findings, detected.compilerWarnings(), detected.scripts(), detected.scope(),
                 job.revision(), evidence.paragraphs(), evidence.items(), decisions, evidence.truncated(), decisionError);
     }
 
@@ -293,6 +298,26 @@ class ConversionService {
             ReviewDecisions.save(directory, stored);
             return new DocumentInspector.Review(review.elements(), review.findings(), review.compilerWarnings(), review.scripts(), review.scope(), review.revision(),
                     review.originalText(), review.items(), ReviewDecisions.apply(stored, review.items(), revision), review.originalTruncated(), "");
+        }
+    }
+
+    CaptionRepairs.Plan captionRepairs(String id) throws IOException {
+        try (var operation = store.read(id)) {
+            Job job = ready(id); Path directory = store.directory(id);
+            String source = new String(store.versions().current(job, directory), StandardCharsets.UTF_8);
+            return CaptionRepairs.preview(source, job.revision(), WordReferenceSupport.warnings(directory.resolve("input.docx"), directory.resolve("output")));
+        }
+    }
+
+    RestoredDocument applyCaptionRepairs(String id, int revision, String sourceHash, List<String> proposalIds) throws IOException {
+        try (var operation = store.edit(id)) {
+            Job job = ready(id);
+            if (job.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed. Preview caption repairs again before applying.");
+            if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) throw new ApiException(HttpStatus.CONFLICT, "Wait for PDF compilation before repairing captions.");
+            Path directory = store.directory(id);
+            String source = new String(store.versions().current(job, directory), StandardCharsets.UTF_8);
+            String repaired = CaptionRepairs.apply(source, revision, sourceHash, proposalIds, WordReferenceSupport.warnings(directory.resolve("input.docx"), directory.resolve("output")));
+            return new RestoredDocument(saveSourceLocked(id, repaired, revision), repaired);
         }
     }
 
