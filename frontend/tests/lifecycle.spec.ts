@@ -56,7 +56,7 @@ async function setup(page: Page) {
 async function open(page: Page, title = 'research.docx') {
   await page.getByRole('button', { name: 'All documents', exact: true }).click()
   await libraryDialog(page).getByRole('button', { name: `Open ${title}`, exact: true }).click()
-  await expect(editor(page)).toHaveValue(ORIGINAL)
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
 }
 
 async function requestDelete(page: Page, title = 'research.docx') {
@@ -79,11 +79,11 @@ test('renames persist after reload without changing the filename, source or draf
   await expect(libraryDialog(page)).toContainText('Original: research.docx')
   await page.screenshot({ path: testInfo.outputPath('renamed-library.png'), fullPage: true })
   await libraryDialog(page).getByRole('button', { name: 'Close', exact: true }).click()
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
   expect(state.job.filename).toBe('research.docx'); expect(state.job.revision).toBe(0); expect(state.saves).toBe(0)
   await page.reload()
   await page.getByRole('button', { name: 'Restore draft', exact: true }).click()
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
   await expect(page.locator('.ui-topbar')).toContainText('Paper ภาษาไทย')
 })
 
@@ -144,7 +144,7 @@ test('another tab retains downloadable in-memory edits after server deletion', a
   await requestDelete(page)
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete document', exact: true }).click()
   await expect(other.getByRole('alert', { name: 'Document unavailable' })).toBeVisible()
-  await expect(editor(other)).toHaveValue(EDITED)
+  await expect(editor(other)).toHaveText(EDITED, { useInnerText: true })
   await expect(editor(other)).toBeDisabled()
   await expect(other.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
   const downloading = other.waitForEvent('download')
@@ -162,7 +162,7 @@ for (const incomplete of [false, true]) test(`a ${incomplete ? 'cleanup-pending'
   else state.deleted = true
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await expect(page.getByRole('alert', { name: 'Document unavailable' })).toBeVisible()
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
   expect(await page.evaluate(id => Object.keys(localStorage).some(key => key.startsWith(`doc2tex:draft:${id}:`)), ID)).toBe(true)
   if (incomplete) expect(await page.evaluate(() => sessionStorage.getItem('doc2tex:active-job'))).toBe(ID)
   const downloading = page.waitForEvent('download')

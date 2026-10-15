@@ -64,14 +64,14 @@ const drafts = (page: Page) => page.evaluate(() => Object.keys(localStorage).fil
 test('restores unsaved edits after reloading the active document', async ({ page, isMobile }, testInfo) => {
   await workspace(page)
   await openDocument(page, isMobile)
-  await expect(editor(page)).toHaveValue(ORIGINAL)
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
   await editor(page).fill(EDITED)
   await page.reload()
   await expect(recovery(page)).toContainText('An unsaved draft is available')
   await expect(editor(page)).toBeDisabled()
   await page.screenshot({ path: testInfo.outputPath('draft-recovery.png'), fullPage: true })
   await recovery(page).getByRole('button', { name: 'Restore draft', exact: true }).click()
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()
   await expect(recovery(page)).toBeHidden()
 })
@@ -82,11 +82,11 @@ test('discards a recovered draft and keeps the saved source', async ({ page, isM
   await editor(page).fill(EDITED)
   await page.reload()
   await recovery(page).getByRole('button', { name: 'Discard draft' }).click()
-  await expect(editor(page)).toHaveValue(ORIGINAL)
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
   await expect(editor(page)).toBeEnabled()
   expect(await drafts(page)).toHaveLength(0)
   await page.reload()
-  await expect(editor(page)).toHaveValue(ORIGINAL)
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
   await expect(recovery(page)).toBeHidden()
 })
 
@@ -99,7 +99,7 @@ test('successful saving clears the draft and advances the saved revision', async
   expect(state.job.revision).toBe(1)
   expect(await drafts(page)).toHaveLength(0)
   await page.reload()
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
   await expect(recovery(page)).toBeHidden()
 })
 
@@ -123,7 +123,7 @@ test('failed source loading blocks editing and exporting, then retries without l
   state.sourceFails = false
   await page.getByRole('button', { name: 'Retry loading source' }).click()
   await recovery(page).getByRole('button', { name: 'Restore draft', exact: true }).click()
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
 })
 
 test('conflicting saves preserve drafts and offer older revisions as a download', async ({ page, isMobile }) => {
@@ -145,7 +145,7 @@ test('conflicting saves preserve drafts and offer older revisions as a download'
   expect(await readFile((await download.path())!, 'utf8')).toBe(EDITED)
   expect(state.saves).toBe(1)
   await recovery(page).getByRole('button', { name: 'Discard draft' }).click()
-  await expect(editor(page)).toHaveValue(state.source)
+  await expect(editor(page)).toHaveText(state.source, { useInnerText: true })
 })
 
 test('a failed replacement upload preserves the current edits and their recovery copy', async ({ page, isMobile }) => {
@@ -157,7 +157,7 @@ test('a failed replacement upload preserves the current edits and their recovery
   await page.getByRole('button', { name: 'Convert to LaTeX', exact: true }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard changes' }).click()
   await expect(page.getByRole('alert')).toContainText('Upload failed')
-  await expect(editor(page)).toHaveValue(EDITED)
+  await expect(editor(page)).toHaveText(EDITED, { useInnerText: true })
   expect(await drafts(page)).toHaveLength(1)
 })
 
@@ -180,7 +180,7 @@ test('detects source changes during loading and retries with consistent metadata
   await openDocument(page, isMobile)
   await expect(page.getByRole('alert')).toContainText('The source changed while opening it')
   await page.getByRole('button', { name: 'Retry loading source' }).click()
-  await expect(editor(page)).toHaveValue(state.source)
+  await expect(editor(page)).toHaveText(state.source, { useInnerText: true })
   await editor(page).fill(EDITED)
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
@@ -194,7 +194,7 @@ test('explicitly discarding edits for a successful conversion removes the recove
   await page.getByLabel('Upload Word document').setInputFiles({ name: 'replacement.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from('synthetic upload') })
   await page.getByRole('button', { name: 'Convert to LaTeX', exact: true }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard changes' }).click()
-  await expect(editor(page)).toHaveValue(ORIGINAL)
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
   expect(await drafts(page)).toHaveLength(0)
   await expect(recovery(page)).toBeHidden()
 })
@@ -233,7 +233,7 @@ test(`a ${blank.name} draft stays editable and recoverable without allowing save
   expect(state.saves).toBe(0)
   await page.reload()
   await recovery(page).getByRole('button', { name: 'Restore draft', exact: true }).click()
-  await expect(editor(page)).toHaveValue(blank.source)
+  await expect(editor(page)).toHaveText(blank.source, { useInnerText: true })
   await expect(editor(page)).toBeEnabled()
   await editor(page).fill(EDITED)
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { ConversionReview, Job, SystemStatus } from './api'
 import { api, downloadText, isWorking, isMissingDocument } from './api'
@@ -6,6 +6,7 @@ import { WorkspaceView } from './WorkspaceView'
 import { useDiscardConfirmation } from './components/DiscardConfirmation'
 import { useSourceDocument } from './useSourceDocument'
 import { clearJobDrafts, DELETED_JOB } from './drafts'
+import type { LatexEditorHandle } from './LatexEditor'
 
 const MAX_FILE = 20 * 1024 * 1024
 const ACTIVE_JOB = 'doc2tex:active-job'
@@ -27,6 +28,9 @@ export default function App() {
   const [deletedId, setDeletedId] = useState<string | null>(null)
   const currentId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
+  const editorRef = useRef<LatexEditorHandle>(null)
+  const composition = useRef({ active: false, endedAt: 0 })
+  const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sourceDocument = useSourceDocument(job, setJob)
   const { source, dirty, loading: sourceLoading } = sourceDocument
@@ -197,7 +201,7 @@ export default function App() {
   }
 
   const save = async () => {
-    if (!job || missingDocument || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || saving || busy) return null
+    if (!job || missingDocument || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || saving || compiling || busy) return null
     setSaving(true); setError('')
     try {
       const next = await api<Job>(`/jobs/${job.id}/source`, { method: 'PUT',
@@ -212,7 +216,8 @@ export default function App() {
   }
 
   const buildPreview = async () => {
-    if (!job || missingDocument || !source.trim() || compiling || !sourceDocument.ready || sourceDocument.recovery || busy) return
+    if (!job || missingDocument || !source.trim() || compiling || saving || !system?.tectonic || !sourceDocument.ready || sourceDocument.recovery || busy) return
+    if (!dirty && job.previewStatus === 'READY') { setView('pdf'); return }
     setError(''); setPreviewStarting(true)
     try {
       const next = dirty ? await save() : job
@@ -275,6 +280,33 @@ export default function App() {
   }
 
   const readyForActions = completed && !missingDocument && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source.trim())
+
+  useEffect(() => {
+    const start = () => { composition.current.active = true }
+    const end = () => { composition.current.active = false; composition.current.endedAt = Date.now() }
+    window.addEventListener('compositionstart', start, true)
+    window.addEventListener('compositionend', end, true)
+    return () => { window.removeEventListener('compositionstart', start, true); window.removeEventListener('compositionend', end, true) }
+  }, [])
+
+  const shortcut = useEffectEvent((event: KeyboardEvent) => {
+      const modifier = commandKey === '⌘' ? event.metaKey : event.ctrlKey
+      if (!modifier || event.altKey || event.shiftKey || event.repeat || event.defaultPrevented
+        || event.isComposing || event.keyCode === 229 || composition.current.active
+        || Date.now() - composition.current.endedAt < 50 || editorRef.current?.isComposing()
+        || document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')) return
+      const key = event.key.toLowerCase()
+      if (key !== 's' && key !== 'enter') return
+      event.preventDefault(); event.stopPropagation()
+      if (!readyForActions || saving || compiling) return
+      if (key === 's' && dirty) void save()
+      if (key === 'enter') void buildPreview()
+    })
+  useEffect(() => {
+    window.addEventListener('keydown', shortcut, true)
+    return () => window.removeEventListener('keydown', shortcut, true)
+  }, [])
+
   return <>
     <WorkspaceView model={{ system, history, job, file, template, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
@@ -283,6 +315,7 @@ export default function App() {
       missingDocument, renamed, deleted,
       versionsAvailable: completed && sourceDocument.ready && !sourceDocument.recovery && !missingDocument && !busy,
       restoreVersion,
+      editorRef, commandKey,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
       selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),

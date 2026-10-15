@@ -62,9 +62,9 @@ test('all 65 documents are paginated and an older filename opens and restores ou
   // Open a document by keyboard using its named button.
   await dialog.getByRole('button', { name: /Open older-résumé.docx/ }).focus()
   await page.keyboard.press('Enter')
-  await expect(editor(page)).toHaveValue(source(jobs[0].id))
+  await expect(editor(page)).toHaveText(source(jobs[0].id), { useInnerText: true })
   await page.reload()
-  await expect(editor(page)).toHaveValue(source(jobs[0].id))
+  await expect(editor(page)).toHaveText(source(jobs[0].id), { useInnerText: true })
   await expect(page.getByRole('navigation', { name: 'Recent conversions' }).getByText('older-résumé.docx')).toHaveCount(0)
 })
 
@@ -103,13 +103,13 @@ test('library switching preserves dirty-source confirmation and local recovery',
   }
   await selectOlder()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Keep editing' }).click()
-  await expect(editor(page)).toHaveValue('Unsaved Unicode edits ภาษาไทย')
+  await expect(editor(page)).toHaveText('Unsaved Unicode edits ภาษาไทย', { useInnerText: true })
   await page.reload()
   await page.getByRole('button', { name: 'Restore draft', exact: true }).click()
-  await expect(editor(page)).toHaveValue('Unsaved Unicode edits ภาษาไทย')
+  await expect(editor(page)).toHaveText('Unsaved Unicode edits ภาษาไทย', { useInnerText: true })
   await selectOlder()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard changes' }).click()
-  await expect(editor(page)).toHaveValue(source(jobs[0].id))
+  await expect(editor(page)).toHaveText(source(jobs[0].id), { useInnerText: true })
 })
 
 test('loading results cannot replace a newer filter response', async ({ page }) => {
