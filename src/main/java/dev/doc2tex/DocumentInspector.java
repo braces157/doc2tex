@@ -33,6 +33,14 @@ class DocumentInspector {
     private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final String M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
+    static void detectScripts(String value, Set<String> scripts) {
+        value.codePoints().filter(Character::isLetter).forEach(point -> {
+            var script = Character.UnicodeScript.of(point);
+            if (!Set.of(Character.UnicodeScript.LATIN, Character.UnicodeScript.COMMON, Character.UnicodeScript.INHERITED).contains(script))
+                scripts.add(script.name().toLowerCase(Locale.ROOT).replace('_', ' '));
+        });
+    }
+
     Review review(Path input, Path compilerLog) {
         var counts = new LinkedHashMap<String, Integer>();
         for (String name : List.of("headings", "tables", "equations", "images", "footnotes", "links")) counts.put(name, 0);
@@ -164,11 +172,7 @@ class DocumentInspector {
             if (header && !value.isBlank()) flags.add("headers");
             if (!body) return;
             if (paragraphText.length() < 2048) paragraphText.append(value);
-            value.codePoints().filter(Character::isLetter).forEach(point -> {
-                var script = Character.UnicodeScript.of(point);
-                if (!Set.of(Character.UnicodeScript.LATIN, Character.UnicodeScript.COMMON, Character.UnicodeScript.INHERITED).contains(script))
-                    scripts.add(script.name().toLowerCase(Locale.ROOT).replace('_', ' '));
-            });
+            detectScripts(value, scripts);
         }
     }
 }

@@ -5,8 +5,8 @@ import { ArrowDown, ArrowRight, ArrowUpRight, BracketsCurly, Check, CheckCircle,
   Copy, DotsThree, FileDoc, FileText, FolderSimple, Info, ListChecks, Plus,
   UploadSimple, WarningCircle, X } from '@phosphor-icons/react'
 import { toast } from 'sonner'
-import type { ConversionReview as Review, Job, SystemStatus } from '@/api'
-import { downloadUrl, formatBytes, jobTitle } from '@/api'
+import type { ConversionReview as Review, Job, LayoutOptions, SystemStatus } from '@/api'
+import { downloadUrl, formatBytes, jobTitle, validLayout } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -24,6 +24,7 @@ const DocumentLibrary = lazy(() => import('@/DocumentLibrary').then(module => ({
 const VersionHistory = lazy(() => import('@/VersionHistory').then(module => ({ default: module.VersionHistory })))
 const ConversionReview = lazy(() => import('@/components/ConversionReview').then(module => ({ default: module.ConversionReview })))
 const CaptionRepairsDialog = lazy(() => import('@/CaptionRepairsDialog').then(module => ({ default: module.CaptionRepairsDialog })))
+const LayoutSettings = lazy(() => import('@/LayoutSettings').then(module => ({ default: module.LayoutSettings })))
 
 export interface WorkspaceModel {
   system: SystemStatus | null; history: Job[]; job: Job | null; file: File | null; template: string
@@ -44,6 +45,7 @@ export interface WorkspaceModel {
   reviewSaving: boolean; reviewError: string; retryReview: () => void
   decideFinding: (id: string, status: 'reviewed' | 'needs-work' | 'unreviewed') => void
   applyCaptionRepairs: (revision: number, sourceHash: string, ids: string[]) => Promise<boolean>
+  layout: LayoutOptions; setLayout: (value: LayoutOptions) => void; copyLayout: () => Promise<boolean>
 }
 
 export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
@@ -53,6 +55,7 @@ export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [captionRepairsOpen, setCaptionRepairsOpen] = useState(false)
+  const [layoutOpen, setLayoutOpen] = useState(false)
   const [originalSelection, setOriginalSelection] = useState<{ jobId: string; id: string } | null>(null)
   const originalItem = originalSelection?.jobId === m.job?.id ? m.review?.items?.find(item => item.id === originalSelection?.id) : undefined
   const comparing = Boolean(originalItem && m.view !== 'review')
@@ -90,7 +93,8 @@ export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
             <button className="ui-sample-link" onClick={m.trySample} disabled={m.converting || m.saving || m.system?.pandoc === false}>Explore with a sample document<ArrowUpRight size={13} /></button>
             <div className="ui-template-label"><h3>Choose a starting point</h3><span>LaTeX template</span></div>
             <RadioGroup value={m.template} onValueChange={m.setTemplate} disabled={m.converting} className="ui-template-list" aria-label="LaTeX template">{[{id:'article',title:'Article',detail:'Papers, essays, and focused ideas',icon:FileText},{id:'report',title:'Report',detail:'Chapters and longer documents',icon:FolderSimple}].map(item => <label key={item.id} htmlFor={`template-${item.id}`} className={`ui-template ${m.template === item.id ? 'selected' : ''}`}><item.icon size={22} weight="light" /><span><strong>{item.title}</strong><small>{item.detail}</small></span><RadioGroupItem id={`template-${item.id}`} value={item.id} aria-label={item.title} /></label>)}</RadioGroup>
-            <Button className="ui-convert-button" disabled={!m.file || m.converting || m.saving || m.system?.pandoc === false} onClick={m.startConversion}>{m.converting ? 'Converting your document…' : 'Convert to LaTeX'}<ArrowRight size={18} /></Button>
+            <details className="ui-layout-options" onToggle={event => setLayoutOpen(event.currentTarget.open)}><summary>Layout options</summary>{layoutOpen && <Suspense fallback={<p role="status">Loading layout options…</p>}><LayoutSettings layout={m.layout} onChange={m.setLayout} template={m.template} onTemplate={m.setTemplate} job={m.job} disabled={m.converting || m.saving} canCopy={m.readyForActions && !m.dirty && !m.compiling && !m.saving && m.system?.pandoc !== false} dirty={m.dirty} onCopy={m.copyLayout} /></Suspense>}</details>
+            <Button className="ui-convert-button" disabled={!m.file || m.converting || m.saving || m.system?.pandoc === false || !validLayout(m.layout)} onClick={m.startConversion}>{m.converting ? 'Converting your document…' : 'Convert to LaTeX'}<ArrowRight size={18} /></Button>
             <p className="ui-convert-note"><CheckCircle size={14} />Editable source. Images included.</p>
             {m.job && <div className={`ui-job-status ${m.job.status === 'FAILED' ? 'failed' : ''}`} role="status"><div>{m.completed ? <CheckCircle size={19} weight="fill" /> : m.job.status === 'FAILED' ? <WarningCircle size={19} /> : <Clock size={19} />}<strong>{m.completed ? 'Your next draft is ready.' : m.job.status === 'FAILED' ? 'This document needs attention.' : 'Making room for your words…'}</strong></div><p>{m.job.message}</p>{m.converting && <Progress className="ui-job-progress" />}</div>}
             <div className="ui-input-note"><Info size={16} /><p>Best with Word heading styles and native equations. Complex layouts may need a final edit.</p></div>

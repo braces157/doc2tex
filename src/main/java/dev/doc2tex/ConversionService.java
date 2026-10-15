@@ -51,17 +51,37 @@ class ConversionService {
     }
 
     Job submit(MultipartFile file, String template) throws IOException {
+        return submit(file, template, LayoutOptions.defaults());
+    }
+
+    Job submit(MultipartFile file, String template, LayoutOptions layout) throws IOException {
+        return submit(file.getOriginalFilename(), file.getSize(), template, layout, "", file::transferTo);
+    }
+
+    Job deriveLayout(String id, int revision, String template, LayoutOptions layout) throws IOException {
+        try (var operation = store.read(id)) {
+            Job parent = ready(id);
+            if (parent.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed. Reopen this document before creating a layout copy.");
+            Path original = original(id);
+            String name = parent.filename(); if (name.length() > 180) name = name.substring(0, 180);
+            return submit(parent.filename(), Files.size(original), template, layout, name + " · layout copy", path -> Files.copy(original, path));
+        }
+    }
+
+    @FunctionalInterface private interface InputWriter { void write(Path path) throws IOException; }
+    private Job submit(String originalFilename, long size, String template, LayoutOptions layout, String displayName, InputWriter writer) throws IOException {
         if (!List.of("article", "report").contains(template)) throw bad("Choose the article or report template.");
-        String filename = cleanFilename(file.getOriginalFilename());
+        if (layout == null) throw bad("Choose valid layout settings.");
+        String filename = cleanFilename(originalFilename);
         if (!filename.toLowerCase(Locale.ROOT).endsWith(".docx")) throw bad("Choose a Word .docx file.");
-        if (file.isEmpty() || file.getSize() > 20L * 1024 * 1024) throw bad("Choose a DOCX file between 1 byte and 20 MB.");
+        if (size <= 0 || size > 20L * 1024 * 1024) throw bad("Choose a DOCX file between 1 byte and 20 MB.");
         if (!tools.available(tools.pandoc())) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                 "Pandoc is unavailable. Run scripts/setup-tools.ps1, then restart the app.");
         String id = UUID.randomUUID().toString();
         Path directory = store.directory(id);
         Files.createDirectories(directory);
         Path input = directory.resolve("input.docx");
-        file.transferTo(input);
+        writer.write(input);
         try { validator.validate(input); }
         catch (RuntimeException exception) {
             Files.deleteIfExists(input);
@@ -70,7 +90,7 @@ class ConversionService {
         }
         Instant now = Instant.now();
         Job job = new Job(id, filename, template, "QUEUED", "NOT_REQUESTED", "Waiting for a conversion worker.", "",
-                now, now, file.getSize(), 0);
+                now, now, size, 0, displayName, false, layout);
         store.save(job);
         try { executor.execute(() -> convert(id)); }
         catch (RejectedExecutionException exception) {
@@ -94,9 +114,10 @@ class ConversionService {
             Path conversionInput = WordReferenceSupport.prepare(directory.resolve("input.docx"), directory, output);
             List<String> command = new ArrayList<>(List.of(tools.pandoc(), "--sandbox", "--from=docx", "--to=latex",
                     "--standalone", "--wrap=none", "--track-changes=accept", "--extract-media=media", "--metadata=date:",
-                    "--variable=documentclass:" + job.template(), "--variable=geometry:margin=1in",
+                    "--variable=documentclass:" + job.template(),
                     "--output=main.tex", conversionInput.toString()));
-            fonts.prepare(inspector.review(directory.resolve("input.docx"), null), output, command);
+            job.layout().prepare(output, command);
+            fonts.prepare(inspector.review(directory.resolve("input.docx"), null), output, command, job.layout().metadataText());
             WordReferenceSupport.configure(command);
             ToolRunner.Result result = runner.run(command, output, directory.resolve("conversion.log"),
                     properties.conversionTimeoutSeconds());
@@ -110,8 +131,10 @@ class ConversionService {
                     .collect(java.util.stream.Collectors.joining());
             Files.writeString(output.resolve("README.txt"), "Converted with doc2TeX and Pandoc.\n\n"
                     + "main.tex is the editable source. Keep the media folder beside it.\n"
-                    + "Compile with a current TeX distribution, or upload this ZIP to Overleaf.\n"
+                    + "Compile with Tectonic (tectonic main.tex) or current XeLaTeX (xelatex main.tex), or upload this ZIP to Overleaf.\n"
                     + "If a fonts folder is included, select XeLaTeX as the compiler in Overleaf or your TeX editor.\n"
+                    + "Initial conversion layout: " + job.layout().description() + ". See layout-settings.json for structured settings.\n"
+                    + "Settings describe conversion; later manual source edits take precedence.\n"
                     + "Review equations, references and complex tables against the original.\n" + review + warnings);
             store.versions().initialize(store.get(id), directory, false);
             store.save(store.get(id).withStatus("COMPLETED", result.log().isBlank()
@@ -265,6 +288,10 @@ class ConversionService {
         Path log = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
         var detected = inspector.review(directory.resolve("input.docx"), log);
         var findings = new ArrayList<>(detected.findings());
+        var scripts = new java.util.LinkedHashSet<>(detected.scripts());
+        var metadataScripts = new java.util.LinkedHashSet<String>(); DocumentInspector.detectScripts(job.layout().metadataText(), metadataScripts);
+        metadataScripts.removeAll(scripts); scripts.addAll(metadataScripts);
+        if (!metadataScripts.isEmpty()) findings.add(new DocumentInspector.Finding("metadata-fonts", "warning", "Multilingual layout metadata", "Review title, author and date fonts for " + String.join(", ", metadataScripts) + ". Bundled fonts cover supported scripts; unusual scripts may require manual font settings."));
         var referenceWarnings = WordReferenceSupport.warnings(directory.resolve("input.docx"), directory.resolve("output"));
         if (!referenceWarnings.isEmpty()) findings.add(new DocumentInspector.Finding("references", "warning", "References need manual review", String.join(" ", referenceWarnings.stream().limit(8).toList())));
         String source = null;
@@ -276,7 +303,7 @@ class ConversionService {
         List<ReviewDecisions.Decision> decisions = List.of(); String decisionError = "";
         try { decisions = ReviewDecisions.apply(ReviewDecisions.load(directory), evidence.items(), job.revision()); }
         catch (IOException | RuntimeException exception) { decisionError = "Saved review decisions could not be read. Back up this project's storage before repairing review-decisions.json. Detected risks and original text remain available."; }
-        return new DocumentInspector.Review(detected.elements(), findings, detected.compilerWarnings(), detected.scripts(), detected.scope(),
+        return new DocumentInspector.Review(detected.elements(), findings, detected.compilerWarnings(), List.copyOf(scripts), detected.scope(),
                 job.revision(), evidence.paragraphs(), evidence.items(), decisions, evidence.truncated(), decisionError);
     }
 
@@ -381,6 +408,9 @@ class ConversionService {
             zip.closeEntry();
             zip.putNextEntry(new ZipEntry("conversion-review.json"));
             zip.write(JsonMapper.builder().build().writeValueAsBytes(review(id)));
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("layout-settings.json"));
+            zip.write(JsonMapper.builder().build().writeValueAsBytes(job.layout()));
             zip.closeEntry();
             for (Path file : paths.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).sorted().toList()) {
                 String name = output.relativize(file).toString().replace('\\', '/');

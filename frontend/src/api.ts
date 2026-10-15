@@ -12,7 +12,18 @@ export interface Job {
   revision: number
   displayName?: string
   deletionPending?: boolean
+  layout?: LayoutOptions
 }
+
+export interface LayoutOptions { paper: 'a4' | 'letter'; fontSize: number; marginMm: number; title: string; author: string; date: string }
+export const DEFAULT_LAYOUT: LayoutOptions = { paper: 'letter', fontSize: 10, marginMm: 25.4, title: '', author: '', date: '' }
+const safeLayoutText = (value: string) => !Array.from(value).some(character => {
+  const point = character.codePointAt(0)!
+  return point < 32 || (point >= 127 && point <= 159) || (point >= 0xd800 && point <= 0xdfff)
+})
+export const validLayout = (layout: LayoutOptions) => ['a4', 'letter'].includes(layout.paper) && [10, 11, 12].includes(layout.fontSize)
+  && Number.isFinite(layout.marginMm) && layout.marginMm >= 10 && layout.marginMm <= 50 && Math.abs(layout.marginMm * 10 - Math.round(layout.marginMm * 10)) < 1e-8
+  && layout.title.length <= 200 && layout.author.length <= 200 && layout.date.length <= 80 && safeLayoutText(layout.title + layout.author + layout.date)
 
 export interface SystemStatus {
   pandoc: boolean

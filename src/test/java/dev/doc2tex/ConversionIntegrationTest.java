@@ -20,6 +20,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "doc2tex.data-dir=${java.io.tmpdir}/doc2tex-tests-${random.uuid}")
@@ -53,6 +54,35 @@ class ConversionIntegrationTest {
             Thread.sleep(100);
         }
         fail("Conversion timed out"); return job;
+    }
+
+    @Test void layoutUploadAndCopyRoutesValidateOptionsAndProtectEditedParent() throws Exception {
+        assumeTrue(tools.available(tools.pandoc()));
+        var layout = new LayoutOptions("a4", 11, new java.math.BigDecimal("20"), "HTTP_TITLE & metadata", "Author", "2026");
+        var parts = new LinkedMultiValueMap<String, Object>();
+        parts.add("file", new ByteArrayResource(SampleDocument.create()) { @Override public String getFilename() { return "layout-http.docx"; } });
+        parts.add("template", "article"); parts.add("layout", JsonMapper.builder().build().writeValueAsString(layout));
+        Job parent = await(client().post().uri("/api/jobs").contentType(MediaType.MULTIPART_FORM_DATA).body(parts).retrieve().body(Job.class));
+        assertEquals("COMPLETED", parent.status()); assertEquals(layout, parent.layout());
+        String edited = service.source(parent.id()) + "\n% HTTP_KEEP_PARENT_EDIT"; parent = service.saveSource(parent.id(), edited, 0);
+        String path = "/api/jobs/" + parent.id() + "/layout-copy";
+        var invalid = new java.util.LinkedHashMap<String, Object>(Map.of("paper", "a4", "fontSize", 11, "marginMm", 20, "title", "", "author", "", "date", ""));
+        for (Object font : List.of(13, 11.9)) {
+            invalid.put("fontSize", font);
+            var failure = assertThrows(HttpClientErrorException.class, () -> client().post().uri(path).body(Map.of("revision", 1, "template", "report", "layout", invalid)).retrieve().body(String.class));
+            assertEquals(HttpStatus.BAD_REQUEST, failure.getStatusCode());
+        }
+        var stale = assertThrows(HttpClientErrorException.class, () -> client().post().uri(path).body(Map.of("revision", 0, "template", "report", "layout", layout)).retrieve().body(String.class));
+        assertEquals(HttpStatus.CONFLICT, stale.getStatusCode());
+        var missing = assertThrows(HttpClientErrorException.class, () -> client().post().uri(path).body(Map.of("template", "report", "layout", layout)).retrieve().body(String.class));
+        assertEquals(HttpStatus.BAD_REQUEST, missing.getStatusCode());
+        Job copy = await(client().post().uri(path).body(Map.of("revision", 1, "template", "report", "layout", layout)).retrieve().body(Job.class));
+        assertNotEquals(parent.id(), copy.id()); assertEquals("report", copy.template()); assertEquals(layout, copy.layout());
+        assertEquals(edited, service.source(parent.id())); assertFalse(service.source(copy.id()).contains("HTTP_KEEP_PARENT_EDIT"));
+        assertEquals(2, service.versions(parent.id()).items().size()); assertEquals(1, service.versions(copy.id()).items().size());
+        var before = store.list().size(); parts.set("layout", "{\"paper\":\"a4\",\"fontSize\":11.9,\"marginMm\":20,\"title\":\"\",\"author\":\"\",\"date\":\"\"}");
+        var invalidUpload = assertThrows(HttpClientErrorException.class, () -> client().post().uri("/api/jobs").contentType(MediaType.MULTIPART_FORM_DATA).body(parts).retrieve().body(String.class));
+        assertEquals(HttpStatus.BAD_REQUEST, invalidUpload.getStatusCode()); assertEquals(before, store.list().size());
     }
 
     @Test void diagnosticsRouteKeepsRevisionAndTruncationAndHandlesInterruptedMetadata() throws Exception {

@@ -106,7 +106,7 @@ class JobStore {
                     p.getProperty("status"), p.getProperty("previewStatus"), p.getProperty("message", ""),
                     p.getProperty("previewMessage", ""), Instant.parse(p.getProperty("createdAt")),
                     Instant.parse(p.getProperty("updatedAt")), Long.parseLong(p.getProperty("size")),
-                    Integer.parseInt(p.getProperty("revision", "0")), p.getProperty("displayName", ""), false);
+                    Integer.parseInt(p.getProperty("revision", "0")), p.getProperty("displayName", ""), false, LayoutOptions.read(p));
         }
     }
 
@@ -299,6 +299,7 @@ class JobStore {
         p.setProperty("size", Long.toString(job.size()));
         p.setProperty("revision", Integer.toString(job.revision()));
         p.setProperty("displayName", job.displayName());
+        job.layout().write(p);
         Path temporary = metadata.resolveSibling(metadata.getFileName() + ".tmp");
         checkUnlinked(temporary);
         try (OutputStream output = Files.newOutputStream(temporary)) { p.store(output, "doc2TeX job"); }

@@ -70,8 +70,15 @@ class ConversionController {
     }
 
     @PostMapping(value = "/jobs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    ResponseEntity<Job> create(@RequestPart MultipartFile file, @RequestParam(defaultValue = "article") String template) throws IOException {
-        return ResponseEntity.accepted().body(service.submit(file, template));
+    ResponseEntity<Job> create(@RequestPart MultipartFile file, @RequestParam(defaultValue = "article") String template,
+            @RequestParam(required = false) String layout) throws IOException {
+        return ResponseEntity.accepted().body(service.submit(file, template, LayoutOptions.parse(layout)));
+    }
+
+    record LayoutCopy(@NotNull @PositiveOrZero Integer revision, @NotBlank String template, @NotNull @Valid LayoutOptions layout) {}
+    @PostMapping("/jobs/{id}/layout-copy")
+    ResponseEntity<Job> layoutCopy(@PathVariable String id, @Valid @RequestBody LayoutCopy request) throws IOException {
+        return ResponseEntity.accepted().body(service.deriveLayout(id, request.revision(), request.template(), request.layout()));
     }
 
     @GetMapping(value = "/jobs/{id}/source", produces = "text/plain;charset=UTF-8")

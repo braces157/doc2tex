@@ -63,3 +63,11 @@
 .latex-editor-host .cm-content[aria-disabled=true] { opacity:.65; }
 .shortcut-hint { font:9px var(--font-mono); opacity:.7; margin-left:5px; white-space:nowrap; }
 @media (max-width:640px) { .latex-editor-shell { height:445px; }.latex-editor-tools form { margin-left:0; }.latex-editor-tools button { font-size:10px; }.latex-editor-help { font-size:9px; }.latex-editor-host .cm-search input[type=text] { max-width:120px; }.shortcut-hint { font-size:8px; } }
+.ui-layout-options { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; font-size: 13px; }
+.ui-layout-options > summary { cursor: pointer; font-weight: 600; }
+.ui-layout-settings > p { margin: 12px 0; color: var(--muted-foreground); line-height: 1.6; }
+.ui-layout-fields { border: 0; padding: 0; margin: 14px 0; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
+.ui-layout-fields label { display: grid; gap: 6px; font-size: 12px; font-weight: 500; min-width: 0; }
+.ui-layout-fields .ui-layout-wide { grid-column: 1 / -1; }
+.ui-layout-fields input, .ui-layout-fields select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; }
+.ui-layout-fields :is(input,select):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
