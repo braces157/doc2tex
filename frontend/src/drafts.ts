@@ -36,3 +36,12 @@ export function removeDraft(draft: Draft) {
   const current = localStorage.getItem(key(draft))
   if (current && (JSON.parse(current) as Draft).token === draft.token) localStorage.removeItem(key(draft))
 }
+
+export const DELETED_JOB = 'doc2tex:deleted-job'
+
+export function clearJobDrafts(jobId: string) {
+  const names = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+  for (const name of names) if (name?.startsWith(`${PREFIX}${jobId}:`)) localStorage.removeItem(name)
+  // Other tabs keep their in-memory source and can download it after receiving this event.
+  localStorage.setItem(DELETED_JOB, JSON.stringify({ id: jobId, token: crypto.randomUUID() }))
+}

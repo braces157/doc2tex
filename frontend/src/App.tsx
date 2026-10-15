@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { ConversionReview, Job, SystemStatus } from './api'
-import { api, downloadText, isWorking } from './api'
+import { api, downloadText, isWorking, isMissingDocument } from './api'
 import { WorkspaceView } from './WorkspaceView'
 import { useDiscardConfirmation } from './components/DiscardConfirmation'
 import { useSourceDocument } from './useSourceDocument'
+import { clearJobDrafts, DELETED_JOB } from './drafts'
 
 const MAX_FILE = 20 * 1024 * 1024
 const ACTIVE_JOB = 'doc2tex:active-job'
@@ -23,11 +24,13 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [view, setView] = useState<'source' | 'pdf' | 'review'>('source')
   const [review, setReview] = useState<ConversionReview | null>(null)
+  const [deletedId, setDeletedId] = useState<string | null>(null)
   const currentId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sourceDocument = useSourceDocument(job, setJob)
   const { source, dirty, loading: sourceLoading } = sourceDocument
+  const missingDocument = Boolean(job && (deletedId === job.id || sourceDocument.missing))
   const converting = busy || Boolean(job && isWorking(job.status))
   const compiling = previewStarting || Boolean(job && isWorking(job.previewStatus))
   const completed = job?.status === 'COMPLETED'
@@ -36,6 +39,14 @@ export default function App() {
   const jobStatus = job?.status
   const previewStatus = job?.previewStatus
   const { confirmDiscard, dialog } = useDiscardConfirmation(dirty)
+  const noteMissing = useCallback((id: string, error: unknown) => {
+    if (!isMissingDocument(error)) return
+    setDeletedId(id)
+    if (error.status === 404) {
+      try { if (sessionStorage.getItem(ACTIVE_JOB) === id) sessionStorage.removeItem(ACTIVE_JOB) }
+      catch { /* In-memory text stays downloadable when browser storage is unavailable. */ }
+    }
+  }, [])
   const rememberJob = (id: string | null) => {
     try {
       if (id) sessionStorage.setItem(ACTIVE_JOB, id)
@@ -77,6 +88,25 @@ export default function App() {
   }, [dirty])
 
   useEffect(() => {
+    if (!jobId) return
+    const controller = new AbortController()
+    const check = () => {
+      void api<Job>(`/jobs/${jobId}`, { signal: controller.signal }).catch(error => {
+        if (!controller.signal.aborted && currentId.current === jobId) noteMissing(jobId, error)
+      })
+    }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== DELETED_JOB || !event.newValue) return
+      try {
+        if ((JSON.parse(event.newValue) as { id?: string }).id === jobId) check()
+      } catch { /* Ignore malformed browser notices. Confirm deletion with the server. */ }
+    }
+    window.addEventListener('focus', check)
+    window.addEventListener('storage', onStorage)
+    return () => { controller.abort(); window.removeEventListener('focus', check); window.removeEventListener('storage', onStorage) }
+  }, [jobId, noteMissing])
+
+  useEffect(() => {
     if (!jobId || (!isWorking(jobStatus ?? '') && !isWorking(previewStatus ?? ''))) return
     const controller = new AbortController()
     let timeout: ReturnType<typeof setTimeout>
@@ -89,6 +119,7 @@ export default function App() {
         if (isWorking(next.status) || isWorking(next.previewStatus)) timeout = setTimeout(poll, 1200)
       } catch (e) {
         if (!controller.signal.aborted) {
+          if (isMissingDocument(e)) { noteMissing(jobId, e); return }
           setError(e instanceof Error ? e.message : 'Could not check progress.')
           timeout = setTimeout(poll, 4000)
         }
@@ -96,7 +127,7 @@ export default function App() {
     }
     timeout = setTimeout(poll, 500)
     return () => { controller.abort(); clearTimeout(timeout) }
-  }, [jobId, jobStatus, previewStatus])
+  }, [jobId, jobStatus, previewStatus, noteMissing])
 
   useEffect(() => {
     if (!jobId || jobStatus !== 'COMPLETED') return
@@ -166,7 +197,7 @@ export default function App() {
   }
 
   const save = async () => {
-    if (!job || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || saving || busy) return null
+    if (!job || missingDocument || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || saving || busy) return null
     setSaving(true); setError('')
     try {
       const next = await api<Job>(`/jobs/${job.id}/source`, { method: 'PUT',
@@ -176,19 +207,19 @@ export default function App() {
       setHistory(previous => previous.map(item => item.id === next.id ? next : item))
       toast.success('Your source is saved')
       return next
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save changes.'); return null }
+    } catch (e) { noteMissing(job.id, e); setError(e instanceof Error ? e.message : 'Could not save changes.'); return null }
     finally { setSaving(false) }
   }
 
   const buildPreview = async () => {
-    if (!job || !source.trim() || compiling || !sourceDocument.ready || sourceDocument.recovery || busy) return
+    if (!job || missingDocument || !source.trim() || compiling || !sourceDocument.ready || sourceDocument.recovery || busy) return
     setError(''); setPreviewStarting(true)
     try {
       const next = dirty ? await save() : job
       if (!next) return
       setJob(await api<Job>(`/jobs/${next.id}/preview`, { method: 'POST' }))
       setView('pdf')
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not start PDF compilation.') }
+    } catch (e) { noteMissing(job.id, e); setError(e instanceof Error ? e.message : 'Could not start PDF compilation.') }
     finally { setPreviewStarting(false) }
   }
 
@@ -203,17 +234,37 @@ export default function App() {
   }
 
   const download = async () => {
-    if (!job || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || busy) return
+    if (!job || missingDocument || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || busy) return
     const next = dirty ? await save() : job
     if (next) window.location.assign(`/api/jobs/${next.id}/download`)
   }
 
-  const readyForActions = completed && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source.trim())
+  const renamed = (next: Job) => {
+    if (currentId.current === next.id) setJob(next)
+    setHistory(previous => previous.map(item => item.id === next.id ? next : item))
+  }
+
+  const deleted = (removed: Job) => {
+    // This callback runs only after the server confirms all job-owned files are gone.
+    try { clearJobDrafts(removed.id) }
+    catch { toast.warning('Document removed. Browser draft cleanup is unavailable; clear local storage manually if needed.') }
+    navigationVersion.current++
+    try { if (sessionStorage.getItem(ACTIVE_JOB) === removed.id) sessionStorage.removeItem(ACTIVE_JOB) }
+    catch { /* Server deletion has succeeded; storage cleanup cannot undo it. */ }
+    setHistory(previous => previous.filter(item => item.id !== removed.id))
+    if (currentId.current === removed.id) {
+      currentId.current = null; rememberJob(null)
+      setJob(null); setFile(null); setReview(null); setView('source'); setError('')
+    }
+  }
+
+  const readyForActions = completed && !missingDocument && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source.trim())
   return <>
     <WorkspaceView model={{ system, history, job, file, template, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
       sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
       recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,
+      missingDocument, renamed, deleted,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
       selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),

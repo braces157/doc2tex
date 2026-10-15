@@ -2,13 +2,13 @@ package dev.doc2tex;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -39,6 +39,18 @@ class ConversionController {
         return store.library(query, status, sort, page, size);
     }
     @GetMapping("/jobs/{id}") Job job(@PathVariable String id) { return store.get(id); }
+    record MetadataUpdate(@NotNull @Size(max = 200) String displayName) {}
+
+    @PatchMapping("/jobs/{id}")
+    Job rename(@PathVariable String id, @Valid @RequestBody MetadataUpdate request) throws IOException {
+        return store.rename(id, request.displayName());
+    }
+
+    @DeleteMapping("/jobs/{id}")
+    ResponseEntity<Void> delete(@PathVariable String id) throws IOException {
+        store.delete(id);
+        return ResponseEntity.noContent().build();
+    }
     @GetMapping("/jobs/{id}/review") DocumentInspector.Review review(@PathVariable String id) { return service.review(id); }
 
     @PostMapping(value = "/jobs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -63,9 +75,10 @@ class ConversionController {
     String compilerLog(@PathVariable String id) throws IOException { return service.compilerLog(id); }
 
     @GetMapping("/jobs/{id}/preview")
-    ResponseEntity<FileSystemResource> pdf(@PathVariable String id) {
+    ResponseEntity<StreamingResponseBody> pdf(@PathVariable String id) {
+        service.pdf(id); // Validate before sending headers; the stream acquires its own lifetime lease.
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=preview.pdf").body(new FileSystemResource(service.pdf(id)));
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=preview.pdf").body(output -> service.writePdf(id, output));
     }
 
     @GetMapping("/jobs/{id}/download")

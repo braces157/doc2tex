@@ -10,6 +10,8 @@ export interface Job {
   updatedAt: string
   size: number
   revision: number
+  displayName?: string
+  deletionPending?: boolean
 }
 
 export interface SystemStatus {
@@ -37,10 +39,19 @@ export async function api<T>(path: string, options: RequestInit = {}, text = fal
   const response = await fetch(`/api${path}`, options)
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { message?: string }
-    throw new Error(error.message || `The request failed (${response.status}). Try again.`)
+    throw new ApiError(error.message || `The request failed (${response.status}). Try again.`, response.status)
   }
+  if (response.status === 204) return undefined as T
   return (text ? response.text() : response.json()) as Promise<T>
 }
+
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) { super(message); this.name = 'ApiError'; this.status = status }
+}
+
+export const isMissingDocument = (error: unknown): error is ApiError => error instanceof ApiError && [404, 410].includes(error.status)
+export const jobTitle = (job: Job) => job.displayName || job.filename
 
 export const isWorking = (status: string) => ['QUEUED', 'CONVERTING', 'COMPILING'].includes(status)
 

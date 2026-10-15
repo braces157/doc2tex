@@ -60,7 +60,7 @@ test('all 65 documents are paginated and an older filename opens and restores ou
   expect(state.requests.at(-1)?.searchParams.get('page')).toBe('0')
   await page.screenshot({ path: testInfo.outputPath('library-search.png'), fullPage: true })
   // Open a document by keyboard using its named button.
-  await dialog.getByRole('button', { name: /older-résumé.docx/ }).focus()
+  await dialog.getByRole('button', { name: /Open older-résumé.docx/ }).focus()
   await page.keyboard.press('Enter')
   await expect(editor(page)).toHaveValue(source(jobs[0].id))
   await page.reload()
@@ -93,13 +93,13 @@ test('library switching preserves dirty-source confirmation and local recovery',
   const { jobs } = await library(page)
   await page.getByRole('button', { name: 'All documents', exact: true }).click()
   const libraryDialog = () => page.getByRole('dialog', { name: 'All documents' })
-  await libraryDialog().getByRole('button', { name: /draft-64.docx/ }).click()
+  await libraryDialog().getByRole('button', { name: /Open draft-64.docx/ }).click()
   await editor(page).fill('Unsaved Unicode edits ภาษาไทย')
   const selectOlder = async () => {
     await page.getByRole('button', { name: 'All documents', exact: true }).click()
     await libraryDialog().getByLabel('Filename').fill('older-résumé')
     await libraryDialog().getByRole('button', { name: 'Search', exact: true }).click()
-    await libraryDialog().getByRole('button', { name: /older-résumé.docx/ }).click()
+    await libraryDialog().getByRole('button', { name: /Open older-résumé.docx/ }).click()
   }
   await selectOlder()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Keep editing' }).click()
@@ -133,7 +133,7 @@ test('loading results cannot replace a newer filter response', async ({ page }) 
   await expect(dialog.getByRole('status')).toHaveText('32 documents found')
   release()
   await expect(dialog.getByRole('listitem').first()).toContainText('draft-63.docx')
-  await expect(dialog.getByRole('button', { name: /older-résumé/ })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: /Open older-résumé/ })).toHaveCount(0)
 })
 
 test('a delayed active-document restore respects navigation back to a new conversion', async ({ page }) => {

@@ -303,7 +303,7 @@ There is no measured customer baseline yet. Establish one before claiming percen
 
 ## Ready-to-use next-agent prompt
 
-> Read repository instructions, `docs/roadmap.md`, `docs/development.md`, and the progress ledger. R01 is implemented in [PR #7](https://github.com/braces157/doc2tex/pull/7): finish its CodeRabbit review, address actionable findings, wait for green Windows/Linux CI on the final commit, and merge before starting R02. Then implement R02, rename and safe deletion, as its own focused PR using the acceptance checks above. Preserve draft recovery, revision conflict protection, and the local-only security model. Use isolated synthetic storage for lifecycle/deletion tests. Repeat the review, CI, and merge gate for each subsequent roadmap ticket; never begin the next ticket before the preceding PR is merged. Keep this prompt and the ledger current.
+> Read repository instructions, `docs/roadmap.md`, `docs/development.md`, and the progress ledger. Continue the first ticket not marked merged, inspecting its existing code, evidence, and open PR before editing. If it is implemented, finish CodeRabbit review, address actionable findings, wait for green Windows/Linux CI on the final commit, and merge it. Only then start the next ticket in dependency order, with its own focused PR and the listed acceptance checks. Preserve draft recovery, revision conflict protection, and the local-only security model. Use isolated synthetic storage for lifecycle/deletion tests. Repeat this review, CI, and merge gate for each subsequent ticket; never begin the next before the preceding PR is merged. Keep the ledger current and report unperformed manual validation accurately.
 
 ## Progress ledger
 
@@ -311,8 +311,8 @@ Update the status and evidence link after each implementation; the roadmap's exi
 
 | Ticket | Status | Implementation / verification evidence |
 | --- | --- | --- |
-| R01 | Implemented; awaiting final PR review and CI | [PR #7](https://github.com/braces157/doc2tex/pull/7), [implementation and verification](roadmap-r01.md) |
-| R02 | Proposed | — |
+| R01 | Merged | [PR #7](https://github.com/braces157/doc2tex/pull/7), [implementation and verification](roadmap-r01.md) |
+| R02 | Implemented; awaiting PR review and CI | [Issue #8](https://github.com/braces157/doc2tex/issues/8), [implementation and verification](roadmap-r02.md) |
 | R03 | Proposed | — |
 | R04 | Proposed | — |
 | R05 | Proposed | — |

@@ -115,6 +115,8 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 | GET | `/api/jobs` | Most recent 30 jobs |
 | GET | `/api/library` | All stored jobs, filtered and paginated (see below) |
 | GET | `/api/jobs/{id}` | Conversion and preview status |
+| PATCH | `/api/jobs/{id}` | JSON `{ "displayName": "Paper draft" }`; rename without changing the original filename |
+| DELETE | `/api/jobs/{id}` | Permanently remove this document's original, source, versions, media and previews; 204 on success |
 | GET | `/api/jobs/{id}/review` | Detected source features, review flags, and PDF compiler warnings |
 | GET | `/api/jobs/{id}/source` | UTF-8 LaTeX source |
 | PUT | `/api/jobs/{id}/source` | JSON `{ "source": "...", "revision": 0 }`; saves and invalidates the PDF |
@@ -126,7 +128,15 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 Conversions: `QUEUED → CONVERTING → COMPLETED / FAILED`.
 Previews: `NOT_REQUESTED → QUEUED → COMPILING → READY / FAILED`.
 
-**All documents:** `GET /api/library?query=&status=&sort=newest&page=0&size=20` returns `{items, page, size, total}`. Filename matching is case-insensitive and trims surrounding query whitespace; filtering happens over the whole stored collection before pagination. `query` is limited to 200 characters. `status` is empty (all), `QUEUED`, `CONVERTING`, `COMPLETED`, or `FAILED`; `sort` is `newest` or `oldest`. Pages are zero-based, size is 1–100, and invalid parameters return 400. Creation-date ties sort by ascending job ID for both directions. Pages beyond the end return empty items with the actual total. The recent-history endpoint stays capped at 30. The workspace restores the active conversion by ID even when it is absent from recent history. Library selection uses the same unsaved-edit confirmation and draft recovery as recent documents.
+**All documents:** `GET /api/library?query=&status=&sort=newest&page=0&size=20` returns `{items, page, size, total}`. Original filename and display-name matching is case-insensitive and trims surrounding query whitespace; filtering happens over the whole stored collection before pagination. `query` is limited to 200 characters. `status` is empty (all), `QUEUED`, `CONVERTING`, `COMPLETED`, or `FAILED`; `sort` is `newest` or `oldest`. Pages are zero-based, size is 1–100, and invalid parameters return 400. Creation-date ties sort by ascending job ID for both directions. Pages beyond the end return empty items with the actual total. The recent-history endpoint stays capped at 30. The workspace restores the active conversion by ID even when it is absent from recent history. Library selection uses the same unsaved-edit confirmation and draft recovery as recent documents.
+
+**Rename and delete:** Library rows expose Rename and Delete actions. `displayName` is optional persisted metadata (empty for legacy jobs); a blank name restores the original filename as the UI title. Names are trimmed, limited to 200 characters, and reject control characters. Renaming preserves source, revision, preview, job ID, and original filename. Downloads keep the original filename.
+
+Deletion requires confirmation naming the document. It rejects queued/running conversion or PDF compilation and active source/save/review/log/PDF/ZIP operations with 409. Per-job read/write leases cover the complete file operation, including streaming downloads. Storage must be a normal local directory: UUID validation and no-follow checks reject symlinks and Windows reparse points, including linked descendants, before cleanup. A second filesystem process is outside the single-user worker-isolation model; this is not an OS sandbox.
+
+Before cleanup, a durable metadata copy is atomically written to `.deletions/{id}.properties` inside the configured data directory. If cleanup fails, the API returns 503 and listing entries include `deletionPending: true`; opening or editing that document returns 410. Retry Delete from All documents after correcting filesystem permissions or releasing external file locks. Cleanup can already have removed some files and cannot be undone. Restart retains the retry entry even if the UUID directory is already gone. Success removes both job files and marker before removing the listing entry. An unreadable deletion marker stops startup to avoid exposing a partially removed project: back up the data directory and repair the marker before restarting; do not remove a marker while its partial UUID directory remains.
+
+Matching browser draft keys and this tab's active-job key are removed only after a successful delete response. Other tabs confirm the deletion on a browser storage notice or window focus; missing-document responses also disable save/build/export. Loaded text stays in memory with **Download unsaved text**, and any local recovery draft has **Download draft**. Download before leaving or reloading that tab. With browser storage disabled, a tab learns about deletion on focus or its next server request.
 
 Saving uses a revision check to prevent overwriting edits from another window. Saving is blocked while that job's preview is queued/compiling. Downloads include the latest saved source; the interface saves pending edits before exporting a ZIP or building a PDF.
 
@@ -140,7 +150,7 @@ Saving uses a revision check to prevent overwriting edits from another window. S
 | `TECTONIC_PATH` | `.tools/tectonic/tectonic[.exe]`, then PATH | Tectonic executable |
 | `DOC2TEX_FONT_DIR` | `.tools/fonts` | Optional multilingual font files and OFL licenses |
 
-Worker counts, queue capacity, and timeouts are configured in `src/main/resources/application.properties`. Pending jobs are marked failed after an app restart; upload again or rebuild the preview. Completed results remain available. Job storage currently has no automatic expiry: stop the app and remove individual job directories from `.data/jobs` to discard old originals and results.
+Worker counts, queue capacity, and timeouts are configured in `src/main/resources/application.properties`. Pending jobs are marked failed after an app restart; upload again or rebuild the preview. Completed results remain available. Job storage has no automatic expiry; use Delete in All documents to remove unwanted originals and results safely.
 
 ## Current scope
 
