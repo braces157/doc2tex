@@ -4,8 +4,10 @@ import type { ConversionReview, Job, SystemStatus } from './api'
 import { api, downloadText, isWorking } from './api'
 import { WorkspaceView } from './WorkspaceView'
 import { useDiscardConfirmation } from './components/DiscardConfirmation'
+import { useSourceDocument } from './useSourceDocument'
 
 const MAX_FILE = 20 * 1024 * 1024
+const ACTIVE_JOB = 'doc2tex:active-job'
 
 export default function App() {
   const [system, setSystem] = useState<SystemStatus | null>(null)
@@ -13,9 +15,6 @@ export default function App() {
   const [job, setJob] = useState<Job | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [template, setTemplate] = useState('article')
-  const [source, setSource] = useState('')
-  const [savedSource, setSavedSource] = useState('')
-  const [sourceLoading, setSourceLoading] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -26,7 +25,8 @@ export default function App() {
   const [review, setReview] = useState<ConversionReview | null>(null)
   const currentId = useRef<string | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const dirty = source !== savedSource
+  const sourceDocument = useSourceDocument(job, setJob)
+  const { source, dirty, loading: sourceLoading } = sourceDocument
   const converting = busy || Boolean(job && isWorking(job.status))
   const compiling = previewStarting || Boolean(job && isWorking(job.previewStatus))
   const completed = job?.status === 'COMPLETED'
@@ -35,12 +35,25 @@ export default function App() {
   const jobStatus = job?.status
   const previewStatus = job?.previewStatus
   const { confirmDiscard, dialog } = useDiscardConfirmation(dirty)
+  const rememberJob = (id: string | null) => {
+    try {
+      if (id) sessionStorage.setItem(ACTIVE_JOB, id)
+      else sessionStorage.removeItem(ACTIVE_JOB)
+    } catch { /* Opening documents still works when browser storage is disabled. */ }
+  }
 
   useEffect(() => {
     const controller = new AbortController()
     void Promise.all([api<SystemStatus>('/system', { signal: controller.signal }),
       api<Job[]>('/jobs', { signal: controller.signal })])
-      .then(([status, jobs]) => { setSystem(status); setHistory(jobs) })
+      .then(([status, jobs]) => {
+        if (controller.signal.aborted) return
+        setSystem(status); setHistory(jobs)
+        try {
+          const previous = jobs.find(item => item.id === sessionStorage.getItem(ACTIVE_JOB))
+          if (previous && !currentId.current) { currentId.current = previous.id; setJob(previous); setTemplate(previous.template) }
+        } catch { /* History remains available without session storage. */ }
+      })
       .catch((e: Error) => { if (e.name !== 'AbortError') setError('Could not connect to the conversion service. Check that Spring Boot is running.') })
     return () => { controller.abort(); if (copyTimer.current) clearTimeout(copyTimer.current) }
   }, [])
@@ -77,22 +90,16 @@ export default function App() {
   useEffect(() => {
     if (!jobId || jobStatus !== 'COMPLETED') return
     const controller = new AbortController()
-    void api<string>(`/jobs/${jobId}/source`, { signal: controller.signal }, true)
-      .then(text => { setSource(text); setSavedSource(text) })
-      .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message) })
-      .finally(() => { if (!controller.signal.aborted) setSourceLoading(false) })
-    return () => controller.abort()
-  }, [jobId, jobStatus])
-
-  useEffect(() => {
-    if (!jobId || jobStatus !== 'COMPLETED') return
-    const controller = new AbortController()
     void api<ConversionReview>(`/jobs/${jobId}/review`, { signal: controller.signal })
       .then(setReview).catch((error: Error) => { if (error.name !== 'AbortError') setError(error.message) })
     return () => controller.abort()
   }, [jobId, jobStatus, previewStatus])
 
-  const discardChanges = confirmDiscard
+  const discardChanges = async () => {
+    if (!(await confirmDiscard())) return false
+    sourceDocument.discardEdits()
+    return true
+  }
 
   const selectFile = (next: File | undefined) => {
     if (!next) return
@@ -102,36 +109,35 @@ export default function App() {
   }
 
   const startConversion = async (selected = file) => {
-    if (!selected || !(await discardChanges())) return
-    setBusy(true); setError(''); setView('source'); setSource(''); setSavedSource(''); setSourceLoading(true); setJob(null)
-    currentId.current = null
-    setReview(null)
+    if (!selected || switchingDisabled || !(await confirmDiscard())) return
+    setBusy(true); setError('')
     try {
       const body = new FormData()
       body.append('file', selected); body.append('template', template)
       const next = await api<Job>('/jobs', { method: 'POST', body })
+      sourceDocument.discardEdits()
       currentId.current = next.id
-      setJob(next)
-      setHistory(await api<Job[]>('/jobs'))
-    } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed. Try again.'); setSourceLoading(false) }
+      rememberJob(next.id)
+      setJob(next); setReview(null); setView('source')
+      setHistory(previous => [next, ...previous.filter(item => item.id !== next.id)])
+    } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed. Try again.') }
     finally { setBusy(false) }
   }
 
   const openJob = async (next: Job) => {
     if (switchingDisabled || next.id === job?.id || !(await discardChanges())) return
     currentId.current = next.id
+    rememberJob(next.id)
     setReview(null)
-    setJob(next); setFile(null); setTemplate(next.template); setSource(''); setSavedSource(''); setSourceLoading(true); setError(''); setView('source')
-    void api<Job>(`/jobs/${next.id}`).then(latest => {
-      if (currentId.current === latest.id) setJob(latest)
-    }).catch((e: Error) => setError(e.message))
+    setJob(next); setFile(null); setTemplate(next.template); setError(''); setView('source')
   }
 
   const reset = async () => {
     if (switchingDisabled || !(await discardChanges())) return
     currentId.current = null
+    rememberJob(null)
     setReview(null)
-    setJob(null); setFile(null); setSource(''); setSavedSource(''); setSourceLoading(false); setError(''); setView('source')
+    setJob(null); setFile(null); setError(''); setView('source')
   }
 
   const trySample = async () => {
@@ -146,13 +152,14 @@ export default function App() {
   }
 
   const save = async () => {
-    if (!job) return null
+    if (!job || !sourceDocument.ready || sourceDocument.recovery || saving || busy) return null
     setSaving(true); setError('')
     try {
       const next = await api<Job>(`/jobs/${job.id}/source`, { method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source, revision: job.revision }) })
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source, revision: sourceDocument.revision }) })
       if (currentId.current !== next.id) return null
-      setJob(next); setSavedSource(source)
+      setJob(next); sourceDocument.markSaved(next, source)
+      setHistory(previous => previous.map(item => item.id === next.id ? next : item))
       toast.success('Your source is saved')
       return next
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save changes.'); return null }
@@ -160,7 +167,7 @@ export default function App() {
   }
 
   const buildPreview = async () => {
-    if (!job || compiling) return
+    if (!job || compiling || !sourceDocument.ready || sourceDocument.recovery || busy) return
     setError(''); setPreviewStarting(true)
     try {
       const next = dirty ? await save() : job
@@ -182,16 +189,19 @@ export default function App() {
   }
 
   const download = async () => {
-    if (!job) return
+    if (!job || !sourceDocument.ready || sourceDocument.recovery || busy) return
     const next = dirty ? await save() : job
     if (next) window.location.assign(`/api/jobs/${next.id}/download`)
   }
 
-  const readyForActions = completed && !sourceLoading && Boolean(source)
+  const readyForActions = completed && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source)
   return <>
     <WorkspaceView model={{ system, history, job, file, template, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
-      selectFile, setDragging, setTemplate, setView, setSource, setError,
+      sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
+      recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,
+      retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
+      selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),
       startConversion: () => void startConversion(), save: () => void save(), copy: () => void copy(),
       download: () => void download(), downloadTex: () => downloadText(source, 'main.tex'),

@@ -10,6 +10,7 @@ A local DOCX → LaTeX app built with **Spring Boot 4.1.1, Java 21+, React, Type
 - Article and report templates.
 - Background conversion with two workers and a bounded queue.
 - Editable LaTeX source, save, copy, and `.tex` download.
+- Browser-local draft recovery, active-document restoration after reload, and retryable source loading.
 - ZIP export with `main.tex`, extracted images, and conversion messages.
 - PDF compilation and a PDF.js canvas viewer with page navigation and PDF download, requested separately from conversion.
 - Local conversion history that survives application restarts.
@@ -70,6 +71,20 @@ java -jar target/doc2tex-0.1.0.jar
 Windows locks the executable JAR while it runs. Stop that server before packaging, or use `./mvnw.cmd verify '-Ddoc2tex.build-directory=target/verification'` to build into a separate directory.
 
 Tests cover input validation, archive traversal, persistence/restart recovery, actual Pandoc conversion of math/tables/images, article/report output, source edits, revision conflicts, and ZIP contents. Real conversion tests are skipped if Pandoc is not installed. PDF compilation is deliberately outside the default tests because its first run downloads TeX dependencies.
+
+Browser workflow tests use Playwright with Chromium at desktop and mobile widths. They start their own Vite server on port 4173 and mock API responses to exercise recovery, revision conflicts, storage failures, and failed uploads deterministically; real converter coverage remains in the backend suite. Run them with:
+
+```powershell
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+CI runs these tests on Windows and Linux and retains traces/screenshots on failure.
+
+Unsaved edits are copied to this browser's local storage on each edit, keyed by document ID and saved revision. Reloading the same tab reopens its active document; opening the document from history in a new tab also offers any available draft. Choose **Restore draft**, **Download draft**, or **Discard draft** before editing. A draft from a different saved revision can be downloaded for comparison, but cannot directly replace the current source. Successful saves and explicitly discarded edits remove this window's draft; they do not remove a newer copy written by another window. Drafts remain in this browser until saved/discarded or browser storage is cleared, and are separate from the server's `.data/jobs` storage. Private browsing, browser cleanup, or storage limits can make recovery unavailable; an inline message explains when saving a local draft fails.
+
+Failed source requests show **Retry loading source** and block editing, PDF builds, and exports until source loading succeeds. A failed replacement upload keeps the existing source and draft available.
 
 The hard-document corpus adds merged tables, fractions, radicals, a matrix, footnotes, nested lists, images, links, accepted revisions, header/footer warnings, eight language samples, and a ten-page register with a 90-row table. Enable PDF regression checks after tool and font setup:
 

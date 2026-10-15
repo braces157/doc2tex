@@ -22,6 +22,7 @@ Upload a document, choose Article or Report, and edit the resulting LaTeX. Build
 
 - **Structure that stays useful.** Headings, lists, tables, links, footnotes, images, and native Word equations convert through Pandoc.
 - **An editor and PDF viewer together.** Save or copy source, navigate PDF pages, and download `.tex`, PDF, or a complete project ZIP.
+- **Pick up unfinished edits.** Recover browser-local drafts after reopening a document, and retry source loading without risking a blank overwrite.
 - **Review before you trust.** Source feature counts and warnings call out tracked changes, merged cells, headers, charts, captions, and compiler problems.
 - **Multilingual exports.** Conditional Noto fonts cover the tested Latin, Vietnamese, Greek, Cyrillic, Thai, Chinese, Japanese, and Arabic samples. Font licenses travel with the export.
 - **A quiet local workspace.** Documents and conversion history stay on disk. A bounded queue handles conversions in the background, with history restored after restart.

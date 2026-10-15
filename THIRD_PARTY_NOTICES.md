@@ -7,6 +7,7 @@ The [MIT license](LICENSE) covers doc2TeX's original code. Dependencies and down
 | Spring Boot and Spring Framework | Apache-2.0 | Maven dependencies in the executable JAR; upstream notices retained |
 | React, Radix, Phosphor, Tailwind, and related frontend packages | Mostly MIT; see exact inventory | Compiled browser assets |
 | PDF.js | Apache-2.0 | Browser PDF viewer and worker |
+| Playwright | Apache-2.0 | Development-only browser test runner; not included in application assets |
 | Geist font | SIL OFL-1.1 | Bundled browser font |
 | Customized shadcn/ui components | MIT | Source in `frontend/src/components/ui`; [license](LICENSES/shadcn-ui.txt) |
 | Apache Maven Wrapper | Apache-2.0 | Wrapper scripts retain their upstream headers |
