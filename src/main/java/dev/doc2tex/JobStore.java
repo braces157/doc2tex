@@ -25,16 +25,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Component
 class JobStore {
     private static final Logger log = LoggerFactory.getLogger(JobStore.class);
     private final Path root;
+    private final SourceVersionStore versions;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
     // Retain lock identities for this process lifetime, including after deletion.
     private final Map<String, ReentrantReadWriteLock> locks = new ConcurrentHashMap<>();
 
-    JobStore(AppProperties properties) { root = Path.of(properties.dataDir()).toAbsolutePath().normalize(); }
+    @Autowired
+    JobStore(AppProperties properties) { this(properties, new SourceVersionStore()); }
+    JobStore(AppProperties properties, SourceVersionStore versions) {
+        root = Path.of(properties.dataDir()).toAbsolutePath().normalize(); this.versions = versions;
+    }
+    SourceVersionStore versions() { return versions; }
 
     @PostConstruct
     void load() throws IOException {
@@ -52,9 +59,13 @@ class JobStore {
                         job = job.withStatus("FAILED", "The app restarted during conversion. Upload the document again.");
                     if (List.of("QUEUED", "COMPILING").contains(job.previewStatus()))
                         job = job.withPreview("FAILED", "The app restarted during compilation. Build the preview again.");
+                    Path marker = root.resolve(".deletions").resolve(id + ".properties");
+                    checkUnlinked(marker);
+                    if (job.status().equals("COMPLETED") && !Files.exists(marker, LinkOption.NOFOLLOW_LINKS))
+                        versions.recover(job, directory);
                     save(job);
                 } catch (Exception exception) {
-                    log.warn("Skipping unreadable job metadata in {}", directory.getFileName());
+                    log.warn("Skipping unavailable job {}: {}", directory.getFileName(), exception.getMessage());
                 }
             }
         }
@@ -196,7 +207,7 @@ class JobStore {
     // Overridden only by temporary-directory failure-injection tests.
     void removePath(Path path) throws IOException { Files.deleteIfExists(path); }
 
-    private void checkUnlinked(Path path) {
+    static void checkUnlinked(Path path) {
         Path current = path.getRoot();
         try {
             for (Path part : path) {
@@ -275,6 +286,7 @@ class JobStore {
         Path temporary = metadata.resolveSibling(metadata.getFileName() + ".tmp");
         checkUnlinked(temporary);
         try (OutputStream output = Files.newOutputStream(temporary)) { p.store(output, "doc2TeX job"); }
+        try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) { channel.force(true); }
         Files.move(temporary, metadata, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 }

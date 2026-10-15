@@ -162,15 +162,37 @@ class ConversionIntegrationTest {
                         .body(Map.of("source", source, "revision", 0)).retrieve().toBodilessEntity());
         assertEquals(HttpStatus.CONFLICT, conflict.getStatusCode());
 
+        var history = client().get().uri(base + "/versions").retrieve().body(SourceVersionStore.History.class);
+        assertNotNull(history); assertFalse(history.legacyHistoryUnavailable()); assertEquals(0, history.firstRevision());
+        assertEquals("converted", history.items().getLast().origin());
+        assertEquals(source, client().get().uri(base + "/versions/0/source").retrieve().body(String.class));
+        Job second = client().put().uri(base + "/source").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("source", edited + "\n% Second saved experiment", "revision", 1)).retrieve().body(Job.class);
+        assertNotNull(second);
+        var restored = client().post().uri(base + "/versions/1/restore").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("revision", second.revision())).retrieve().body(ConversionService.RestoredDocument.class);
+        assertNotNull(restored); assertEquals(3, restored.job().revision()); assertEquals(edited, restored.source());
+        assertEquals("NOT_REQUESTED", restored.job().previewStatus());
+        assertEquals(edited, client().get().uri(base + "/source").retrieve().body(String.class));
+        assertEquals(HttpStatus.CONFLICT, assertThrows(HttpClientErrorException.class,
+                () -> client().post().uri(base + "/versions/0/restore").contentType(MediaType.APPLICATION_JSON)
+                        .body(Map.of("revision", 1)).retrieve().toBodilessEntity()).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(HttpClientErrorException.class,
+                () -> client().post().uri(base + "/versions/0/restore").contentType(MediaType.APPLICATION_JSON)
+                        .body(Map.of()).retrieve().toBodilessEntity()).getStatusCode());
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(HttpClientErrorException.class,
+                () -> client().get().uri(base + "/versions/999/source").retrieve().toBodilessEntity()).getStatusCode());
+
         byte[] archive = client().get().uri(base + "/download").retrieve().body(byte[].class);
         boolean hasSource = false, hasImage = false, hasReadme = false;
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
             java.util.zip.ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 assertFalse(entry.getName().contains(".."));
+                assertFalse(entry.getName().contains(".versions"));
                 if (entry.getName().equals("main.tex")) {
                     hasSource = true;
-                    assertTrue(new String(zip.readAllBytes(), StandardCharsets.UTF_8).contains("thoughtful systems"));
+                    assertEquals(edited, new String(zip.readAllBytes(), StandardCharsets.UTF_8));
                 }
                 hasImage |= entry.getName().startsWith("media/") && entry.getName().endsWith(".png");
                 hasReadme |= entry.getName().equals("README.txt");

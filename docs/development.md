@@ -120,6 +120,9 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 | GET | `/api/jobs/{id}/review` | Detected source features, review flags, and PDF compiler warnings |
 | GET | `/api/jobs/{id}/source` | UTF-8 LaTeX source |
 | PUT | `/api/jobs/{id}/source` | JSON `{ "source": "...", "revision": 0 }`; saves and invalidates the PDF |
+| GET | `/api/jobs/{id}/versions` | Saved source history, current/baseline revision, migration state and storage limits |
+| GET | `/api/jobs/{id}/versions/{revision}/source` | Immutable UTF-8 text of one saved version |
+| POST | `/api/jobs/{id}/versions/{version}/restore` | JSON `{ "revision": 2 }` (required current revision); returns `{job, source}` for the new restored revision |
 | GET | `/api/jobs/{id}/download` | ZIP of saved LaTeX, images, and README |
 | POST | `/api/jobs/{id}/preview` | Queue PDF compilation |
 | GET | `/api/jobs/{id}/preview` | Current compiled PDF |
@@ -141,6 +144,12 @@ Before cleanup, a durable metadata copy is atomically written to `.deletions/{id
 Matching browser draft keys and this tab's active-job key are removed only after a successful delete response. Other tabs confirm the deletion on a browser storage notice or window focus; missing-document responses also disable save/build/export. Loaded text stays in memory with **Download unsaved text**, and any local recovery draft has **Download draft**. Download before leaving or reloading that tab. With browser storage disabled, a tab learns about deletion on focus or its next server request.
 
 Saving uses a revision check to prevent overwriting edits from another window. Saving is blocked while that job's preview is queued/compiling. Downloads include the latest saved source; the interface saves pending edits before exporting a ZIP or building a PDF.
+
+**Saved versions:** Open Saved versions beside Save changes to preview, download or restore earlier saves. New conversions keep the original generated source as version 0. Existing projects begin with a snapshot of their current saved revision; the dialog identifies that earlier overwritten history is unavailable. Restore checks the expected current revision, creates a new increasing revision, preserves earlier snapshots, invalidates the PDF and returns its matching source and metadata together. Unsaved changes require confirmation and are only discarded after a successful restore; failed/stale restores preserve local text and recovery drafts. Restore is blocked while PDF compilation is queued/running. Build a fresh PDF afterward.
+
+History retains up to **100 versions or 100 MiB of saved source per document**, including the baseline. Saves/restores beyond either limit return 507 with a storage-limit explanation. No protected history is silently pruned. Download the current source and export the project before starting a new document when history is full. Normal ZIPs contain only the committed current source, media, fonts and review; historical versions are available as individual source downloads. Deleting a document removes its history too.
+
+Source snapshots and their byte counts/SHA-256 digests are stored outside exports in `.versions/{revision}/`. `job.properties` revision is the committed pointer. Saves atomically publish an immutable snapshot, replace the working source cache, then atomically advance job metadata under the exclusive lease. Canonical source reads and ZIP entries use the committed snapshot. Startup and preview preparation remove uncommitted/staged snapshots and restore `output/main.tex` from the committed source. An interruption before metadata commit keeps the old revision; one after commit keeps the new one. History never comes from preview folders. Tests inject process/write interruptions; abrupt power-loss behavior has not been tested. Corrupt committed snapshots fail integrity checks and remain unavailable rather than being overwritten; back up the job directory and inspect the server log before repairing storage. Deletion markers take precedence so recovery never recreates partially removed jobs.
 
 ## Configuration
 

@@ -68,6 +68,19 @@ class ConversionController {
         return service.saveSource(id, request.source(), request.revision());
     }
 
+    @GetMapping("/jobs/{id}/versions")
+    SourceVersionStore.History versions(@PathVariable String id) throws IOException { return service.versions(id); }
+
+    @GetMapping(value = "/jobs/{id}/versions/{revision}/source", produces = "text/plain;charset=UTF-8")
+    String versionSource(@PathVariable String id, @PathVariable int revision) throws IOException { return service.versionSource(id, revision); }
+
+    record VersionRestore(@NotNull @PositiveOrZero Integer revision) {}
+
+    @PostMapping("/jobs/{id}/versions/{version}/restore")
+    ConversionService.RestoredDocument restore(@PathVariable String id, @PathVariable int version, @Valid @RequestBody VersionRestore request) throws IOException {
+        return service.restoreDocument(id, version, request.revision());
+    }
+
     @PostMapping("/jobs/{id}/preview")
     ResponseEntity<Job> preview(@PathVariable String id) throws IOException { return ResponseEntity.accepted().body(service.preview(id)); }
 

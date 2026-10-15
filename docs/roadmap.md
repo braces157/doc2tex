@@ -312,8 +312,8 @@ Update the status and evidence link after each implementation; the roadmap's exi
 | Ticket | Status | Implementation / verification evidence |
 | --- | --- | --- |
 | R01 | Merged | [PR #7](https://github.com/braces157/doc2tex/pull/7), [implementation and verification](roadmap-r01.md) |
-| R02 | Implemented; awaiting PR review and CI | [Issue #8](https://github.com/braces157/doc2tex/issues/8), [implementation and verification](roadmap-r02.md) |
-| R03 | Proposed | — |
+| R02 | Merged | [PR #9](https://github.com/braces157/doc2tex/pull/9), [implementation and verification](roadmap-r02.md) |
+| R03 | Implemented; awaiting PR review and CI | [Issue #10](https://github.com/braces157/doc2tex/issues/10), [design and verification](roadmap-r03.md) |
 | R04 | Proposed | — |
 | R05 | Proposed | — |
 | R06 | Proposed | — |
