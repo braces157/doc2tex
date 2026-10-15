@@ -33,6 +33,11 @@ async function setup(page: Page, report: CompilerReport = { revision: 1, status:
       }
       return route.fulfill({ contentType: 'text/plain', body: state.source })
     }
+    if (path.endsWith('/preview') && route.request().method() === 'POST') {
+      state.job = { ...state.job, previewStatus: 'READY' }
+      state.report = { revision: state.job.revision, status: 'READY', logTruncated: false, diagnosticsTruncated: false, items: [] }
+      return json(state.job, 202)
+    }
     return json({ message: 'Unexpected request' }, 404)
   })
   await page.goto('/')
@@ -104,8 +109,28 @@ test('diagnostic loading failures disable navigation until a successful retry', 
   await page.getByRole('textbox', { name: 'LaTeX source editor', exact: true }).fill(SOURCE + '\n% edit')
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Retry diagnostics', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Go to source line 3', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Go to source line 3', exact: true })).toHaveCount(0)
   state.fail = false; state.report = { ...state.report, revision: 2 }
   await page.getByRole('button', { name: 'Retry diagnostics', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Go to source line 3', exact: true })).toBeEnabled()
+})
+
+test('a delayed completed-build response cannot display the previous build result', async ({ page }) => {
+  const state = await setup(page)
+  const panel = page.getByRole('region', { name: 'Compiler diagnostics' })
+  await expect(panel.getByRole('heading', { name: 'PDF build failed', exact: true })).toBeVisible()
+  let release!: () => void
+  state.gate = new Promise<void>(resolve => { release = resolve })
+  await page.getByRole('textbox', { name: 'LaTeX source editor', exact: true }).fill(SOURCE.replace('UnknownCommand', 'relax'))
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(panel.getByRole('heading', { name: 'Loading compiler diagnostics…', exact: true })).toBeVisible()
+  await expect(panel.getByRole('button')).toHaveCount(0)
+  await page.getByRole('tab', { name: 'Preview', exact: true }).click()
+  await page.getByRole('button', { name: 'Build PDF preview', exact: true }).click()
+  await expect(page.getByText('PDF compilation failed.', { exact: true })).toBeHidden()
+  await expect(panel.getByRole('heading', { name: 'Loading compiler diagnostics…', exact: true })).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'PDF build failed', exact: true })).toHaveCount(0)
+  await expect(panel.getByText(/These diagnostics are stale/)).toHaveCount(0)
+  release()
+  await expect(panel.getByRole('heading', { name: 'PDF built successfully', exact: true })).toBeVisible()
 })

@@ -295,6 +295,20 @@ class HardDocumentTest {
             Path evidence = Path.of(System.getProperty("doc2tex.build-directory", "target"), "fidelity-evidence", "diagnostics", codes[index]);
             Files.createDirectories(evidence); Files.writeString(evidence.resolve("compiler.log"), service.compilerLog(job.id()));
             Files.writeString(evidence.resolve("main.tex"), source);
+            if (index == 0) {
+                Path compilerLog = store.directory(job.id()).resolve("preview.log");
+                Files.delete(compilerLog); Files.createDirectory(compilerLog);
+                service.preview(job.id());
+                long retryDeadline = System.nanoTime() + 10_000_000_000L;
+                do { job = store.get(job.id()); if (job.previewStatus().equals("FAILED")) break; Thread.sleep(50); }
+                while (System.nanoTime() < retryDeadline);
+                assertEquals("FAILED", job.previewStatus());
+                assertFalse(Files.exists(store.directory(job.id()).resolve("compiler-diagnostics.json")));
+                var failedRetry = service.diagnostics(job.id());
+                assertNull(failedRetry.revision(), "A failed log initialization must not reuse the previous same-revision snapshot");
+                assertEquals("build-failed", failedRetry.items().getFirst().code());
+                Files.delete(compilerLog);
+            }
             if (index == 2) { assertTrue(job.previewMessage().contains("warnings")); assertTrue(Files.size(service.pdf(job.id())) > 500); }
         }
         int compiledRevision = job.revision();

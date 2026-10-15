@@ -179,6 +179,9 @@ class ConversionService {
         if (List.of("QUEUED", "COMPILING", "READY").contains(job.previewStatus())) return job;
         if (!tools.available(tools.tectonic())) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                 "PDF preview needs Tectonic. Run scripts/setup-tools.ps1, then restart the app.");
+        Path diagnostics = store.directory(id).resolve("compiler-diagnostics.json");
+        JobStore.checkUnlinked(diagnostics);
+        Files.deleteIfExists(diagnostics);
         store.versions().recover(job, store.directory(id));
         Job queued = job.withPreview("QUEUED", "Waiting for the PDF compiler.");
         store.save(queued);

@@ -3,25 +3,28 @@ import type { CompilerReport, Job } from '@/api'
 import { api } from '@/api'
 
 export function CompilerDiagnosticsPanel({ job, dirty, canNavigate, onNavigate }: { job: Job; dirty: boolean; canNavigate: boolean; onNavigate: (line: number, revision: number) => void }) {
-  const [result, setResult] = useState<{ id: string; report: CompilerReport } | null>(null)
-  const [error, setError] = useState('')
+  const [result, setResult] = useState<{ key: string; report: CompilerReport | null; error: string } | null>(null)
   const [retry, setRetry] = useState(0)
   const { id, revision, previewStatus } = job
+  const key = `${id}|${revision}|${previewStatus}|${retry}`
   useEffect(() => {
     const controller = new AbortController()
     if (previewStatus === 'QUEUED' || previewStatus === 'COMPILING') return
     if (previewStatus === 'NOT_REQUESTED' && revision === 0) return
     void api<CompilerReport>(`/jobs/${id}/diagnostics`, { signal: controller.signal }).then(report => {
-      if (!controller.signal.aborted) { setResult({ id, report }); setError('') }
-    }).catch((error: Error) => { if (!controller.signal.aborted) setError(error.message) })
+      if (!controller.signal.aborted) setResult({ key, report, error: '' })
+    }).catch((error: Error) => { if (!controller.signal.aborted) setResult({ key, report: null, error: error.message }) })
     return () => controller.abort()
-  }, [id, revision, previewStatus, retry])
-  const report = result?.id === id ? result.report : null
+  }, [id, revision, previewStatus, key])
+  const current = result?.key === key ? result : null
+  const report = current?.report ?? null
+  const error = current?.error ?? ''
   const working = previewStatus === 'QUEUED' || previewStatus === 'COMPILING'
+  const loading = !current && !working
   const stale = Boolean(report && (report.revision === null || report.revision !== revision || dirty))
-  if (!working && !error && (!report || report.status === 'NOT_REQUESTED' && !report.items.length)) return null
-  return <section className="compiler-diagnostics" aria-label="Compiler diagnostics">
-    <h3>{working ? 'Building PDF…' : error ? 'Compiler diagnostics unavailable' : report?.status === 'NOT_REQUESTED' ? 'Previous compiler output' : report?.status === 'FAILED' ? 'PDF build failed' : report?.items.length || report?.logTruncated ? 'PDF built with warnings' : 'PDF built successfully'}</h3>
+  if (previewStatus === 'NOT_REQUESTED' && revision === 0 || !working && !loading && !error && (!report || report.status === 'NOT_REQUESTED' && !report.items.length)) return null
+  return <section className="compiler-diagnostics" aria-label="Compiler diagnostics" aria-busy={working || loading}>
+    <h3>{working ? 'Building PDF…' : loading ? 'Loading compiler diagnostics…' : error ? 'Compiler diagnostics unavailable' : report?.status === 'NOT_REQUESTED' ? 'Previous compiler output' : report?.status === 'FAILED' ? 'PDF build failed' : report?.items.length || report?.logTruncated ? 'PDF built with warnings' : 'PDF built successfully'}</h3>
     {report && <p>Build revision {report.revision ?? 'unknown'} · Current revision {revision}{dirty ? ' with unsaved edits' : ''}</p>}
     {stale && <p className="diagnostics-stale" role="status">{report?.revision === null ? 'The source revision for these diagnostics is unknown.' : 'These diagnostics are stale.'} Save your changes and build again before navigating.</p>}
     {error && <p role="alert">Could not load compiler diagnostics: {error} <button onClick={() => setRetry(value => value + 1)}>Retry diagnostics</button></p>}
