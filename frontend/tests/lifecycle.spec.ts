@@ -180,7 +180,7 @@ test('opening a stale library result retains a downloadable local recovery draft
   state.deleted = true
   await libraryDialog(page).getByRole('button', { name: 'Open research.docx', exact: true }).click()
   const recovery = page.getByRole('region', { name: 'Draft recovery' })
-  await expect(recovery).toContainText('This document is no longer available')
+  await expect(recovery).toContainText('Saved source is unavailable')
   await expect(recovery.getByRole('button', { name: 'Restore draft', exact: true })).toHaveCount(0)
   const downloading = page.waitForEvent('download')
   await recovery.getByRole('button', { name: 'Download draft', exact: true }).click()

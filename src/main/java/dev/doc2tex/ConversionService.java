@@ -6,7 +6,6 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -112,6 +111,7 @@ class ConversionService {
                     + "Compile with a current TeX distribution, or upload this ZIP to Overleaf.\n"
                     + "If a fonts folder is included, select XeLaTeX as the compiler in Overleaf or your TeX editor.\n"
                     + "Review equations, references and complex tables against the original.\n" + review + warnings);
+            store.versions().initialize(store.get(id), directory, false);
             store.save(store.get(id).withStatus("COMPLETED", result.log().isBlank()
                     ? "LaTeX and extracted images are ready." : "LaTeX is ready. See README.txt in the ZIP for conversion messages."));
         } catch (Exception exception) {
@@ -124,19 +124,50 @@ class ConversionService {
     }
 
     private Job saveSourceLocked(String id, String source, int revision) throws IOException {
+        return saveSourceLocked(id, source, revision, -1);
+    }
+
+    private Job saveSourceLocked(String id, String source, int revision, int restoredFrom) throws IOException {
         Job job = ready(id);
         if (job.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed in another window. Reopen this conversion before saving.");
         if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) throw new ApiException(HttpStatus.CONFLICT,
                 "Wait for PDF compilation to finish before saving changes.");
         if (source.isBlank() || source.getBytes(StandardCharsets.UTF_8).length > MAX_SOURCE)
             throw bad("The LaTeX source must contain text and be smaller than 2 MB.");
-        Path output = store.directory(id).resolve("output");
-        Path temporary = output.resolve("main.tex.tmp");
-        Files.writeString(temporary, source);
-        Files.move(temporary, output.resolve("main.tex"), StandardCopyOption.REPLACE_EXISTING);
-        Job edited = job.edited();
-        store.save(edited);
-        return edited;
+        return store.versions().commit(job, store.directory(id), source, restoredFrom, store::save);
+    }
+
+    SourceVersionStore.History versions(String id) throws IOException {
+        try (var operation = store.edit(id)) {
+            Job job = ready(id);
+            store.versions().recover(job, store.directory(id));
+            return store.versions().list(job, store.directory(id));
+        }
+    }
+
+    String versionSource(String id, int revision) throws IOException {
+        try (var operation = store.read(id)) {
+            return new String(store.versions().readVersion(ready(id), store.directory(id), revision), StandardCharsets.UTF_8);
+        }
+    }
+
+    Job restore(String id, int version, int expectedRevision) throws IOException {
+        return restoreDocument(id, version, expectedRevision).job();
+    }
+
+    record RestoredDocument(Job job, String source) {}
+
+    RestoredDocument restoreDocument(String id, int version, int expectedRevision) throws IOException {
+        try (var operation = store.edit(id)) {
+            Job job = ready(id);
+            if (job.revision() != expectedRevision) throw new ApiException(HttpStatus.CONFLICT,
+                    "The source changed in another window. Reopen this conversion before restoring a version.");
+            if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) throw new ApiException(HttpStatus.CONFLICT,
+                    "Wait for PDF compilation to finish before restoring a saved version.");
+            store.versions().recover(job, store.directory(id));
+            String source = new String(store.versions().readVersion(job, store.directory(id), version), StandardCharsets.UTF_8);
+            return new RestoredDocument(saveSourceLocked(id, source, expectedRevision, version), source);
+        }
     }
 
     Job preview(String id) throws IOException {
@@ -148,6 +179,7 @@ class ConversionService {
         if (List.of("QUEUED", "COMPILING", "READY").contains(job.previewStatus())) return job;
         if (!tools.available(tools.tectonic())) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                 "PDF preview needs Tectonic. Run scripts/setup-tools.ps1, then restart the app.");
+        store.versions().recover(job, store.directory(id));
         Job queued = job.withPreview("QUEUED", "Waiting for the PDF compiler.");
         store.save(queued);
         try { executor.execute(() -> compile(id)); }
@@ -184,7 +216,7 @@ class ConversionService {
 
     String source(String id) throws IOException {
         try (var operation = store.read(id)) {
-            ready(id); return Files.readString(store.directory(id).resolve("output/main.tex"));
+            return new String(store.versions().current(ready(id), store.directory(id)), StandardCharsets.UTF_8);
         }
     }
 
@@ -215,6 +247,19 @@ class ConversionService {
         try (var operation = store.read(id)) { Files.copy(pdfLocked(id), stream); }
     }
 
+    Path original(String id) {
+        try (var operation = store.read(id)) {
+            Path input = store.directory(id).resolve("input.docx");
+            JobStore.checkUnlinked(input);
+            if (!Files.isRegularFile(input)) throw new ApiException(HttpStatus.NOT_FOUND, "The original Word document is missing.");
+            return input;
+        }
+    }
+
+    void writeOriginal(String id, OutputStream stream) throws IOException {
+        try (var operation = store.read(id)) { Files.copy(original(id), stream); }
+    }
+
     String compilerLog(String id) throws IOException {
         try (var operation = store.read(id)) { return compilerLogLocked(id); }
     }
@@ -231,14 +276,18 @@ class ConversionService {
     }
 
     private void writeArchiveLocked(String id, OutputStream stream) throws IOException {
-        ready(id);
+        Job job = ready(id);
         Path output = store.directory(id).resolve("output");
         try (ZipOutputStream zip = new ZipOutputStream(stream); var paths = Files.walk(output)) {
+            zip.putNextEntry(new ZipEntry("main.tex"));
+            zip.write(store.versions().current(job, store.directory(id)));
+            zip.closeEntry();
             zip.putNextEntry(new ZipEntry("conversion-review.json"));
             zip.write(JsonMapper.builder().build().writeValueAsBytes(review(id)));
             zip.closeEntry();
             for (Path file : paths.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).sorted().toList()) {
                 String name = output.relativize(file).toString().replace('\\', '/');
+                if (name.equals("main.tex")) continue;
                 if (!(name.equals("main.tex") || name.equals("README.txt") || name.startsWith("media/") || name.startsWith("fonts/"))) continue;
                 zip.putNextEntry(new ZipEntry(name));
                 Files.copy(file, zip);
@@ -260,6 +309,7 @@ class ConversionService {
     private Job ready(String id) {
         Job job = store.get(id);
         if (!job.status().equals("COMPLETED")) throw new ApiException(HttpStatus.CONFLICT, "The conversion is not ready yet.");
+        store.requireHistory(id);
         return job;
     }
 

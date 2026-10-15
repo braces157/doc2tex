@@ -68,6 +68,19 @@ class ConversionController {
         return service.saveSource(id, request.source(), request.revision());
     }
 
+    @GetMapping("/jobs/{id}/versions")
+    SourceVersionStore.History versions(@PathVariable String id) throws IOException { return service.versions(id); }
+
+    @GetMapping(value = "/jobs/{id}/versions/{revision}/source", produces = "text/plain;charset=UTF-8")
+    String versionSource(@PathVariable String id, @PathVariable int revision) throws IOException { return service.versionSource(id, revision); }
+
+    record VersionRestore(@NotNull @PositiveOrZero Integer revision) {}
+
+    @PostMapping("/jobs/{id}/versions/{version}/restore")
+    ConversionService.RestoredDocument restore(@PathVariable String id, @PathVariable int version, @Valid @RequestBody VersionRestore request) throws IOException {
+        return service.restoreDocument(id, version, request.revision());
+    }
+
     @PostMapping("/jobs/{id}/preview")
     ResponseEntity<Job> preview(@PathVariable String id) throws IOException { return ResponseEntity.accepted().body(service.preview(id)); }
 
@@ -85,10 +98,20 @@ class ConversionController {
     ResponseEntity<StreamingResponseBody> download(@PathVariable String id) {
         Job job = store.get(id);
         if (!job.status().equals("COMPLETED")) throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "The conversion is not ready yet.");
+        store.requireHistory(id);
         String filename = job.filename().replaceFirst("(?i)\\.docx$", "") + "-latex.zip";
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename, StandardCharsets.UTF_8).build().toString())
                 .body(output -> service.writeArchive(id, output));
+    }
+
+    @GetMapping("/jobs/{id}/original")
+    ResponseEntity<StreamingResponseBody> original(@PathVariable String id) {
+        Job job = store.get(id);
+        service.original(id);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(job.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(output -> service.writeOriginal(id, output));
     }
 
     @GetMapping("/sample.docx")

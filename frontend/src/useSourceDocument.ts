@@ -52,10 +52,8 @@ export function useSourceDocument(job: Job | null, onLoaded: (job: Job) => void)
           const missing = isMissingDocument(error)
           let recovery: Draft | null = null
           let storageError = ''
-          if (missing) {
-            try { recovery = findDraft(jobId, -1, '') }
-            catch { storageError = STORAGE_ERROR }
-          }
+          try { recovery = findDraft(jobId, -1, '') }
+          catch { storageError = STORAGE_ERROR }
           setLoaded({ request, document: null, recovery, storageError, missing,
             loadError: error instanceof Error ? error.message : 'Could not load the saved source.' })
         }

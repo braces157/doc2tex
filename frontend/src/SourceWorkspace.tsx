@@ -1,6 +1,7 @@
-import { lazy, Suspense, useRef } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { ArrowRight, FileText, WarningCircle } from '@phosphor-icons/react'
 import type { Job } from './api'
+import { downloadUrl } from './api'
 
 const PdfPreview = lazy(() => import('./PdfPreview'))
 
@@ -18,6 +19,7 @@ interface Props {
   saving: boolean
   dirty: boolean
   previewAvailable: boolean
+  originalAvailable: boolean
 }
 
 const example = [
@@ -27,9 +29,29 @@ const example = [
   ['text', 'A little more room to think.'], ['', ''], ['math', 'E = mc^{2}'], ['', ''], ['command', '\\end{document}'],
 ]
 
-export function SourceWorkspace({ job, source, loading, error, onRetry, readOnly, view, onSourceChange, onBuild, compiling, saving, dirty, previewAvailable }: Props) {
+export function SourceWorkspace({ job, source, loading, error, onRetry, readOnly, view, onSourceChange, onBuild, compiling, saving, dirty, previewAvailable, originalAvailable }: Props) {
   const lines = useRef<HTMLDivElement>(null)
-  if (error) return <div className="preview-empty" role="alert"><WarningCircle size={32} /><h3>Could not load your source</h3><p>{error}</p><button className="secondary-button" onClick={onRetry}>Retry loading source<ArrowRight size={16} /></button></div>
+  const [originalDownload, setOriginalDownload] = useState<{ id: string; busy: boolean; error: string } | null>(null)
+  const currentDownload = originalDownload?.id === job?.id ? originalDownload : null
+  const downloadOriginal = async () => {
+    if (!job || currentDownload?.busy) return
+    const id = job.id
+    setOriginalDownload({ id, busy: true, error: '' })
+    try {
+      const response = await fetch(`/api/jobs/${id}/original`)
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({})) as { message?: string }
+        throw new Error(detail.message || `Original download failed (${response.status}). Try again.`)
+      }
+      const url = URL.createObjectURL(await response.blob())
+      downloadUrl(url, job.filename)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setOriginalDownload(previous => previous?.id === id ? { id, busy: false,
+        error: error instanceof Error ? error.message : 'Could not download the original Word document.' } : previous)
+    } finally { setOriginalDownload(previous => previous?.id === id ? { ...previous, busy: false } : previous) }
+  }
+  if (error) return <div className="preview-empty" role="alert"><WarningCircle size={32} /><h3>Could not load your source</h3><p>{error}</p><button className="secondary-button" onClick={onRetry}>Retry loading source<ArrowRight size={16} /></button>{job && originalAvailable && <button className="secondary-button" disabled={currentDownload?.busy} onClick={() => void downloadOriginal()}>{currentDownload?.busy ? 'Downloading original…' : 'Download original Word document'}<FileText size={16} /></button>}{currentDownload?.error && <p>{currentDownload.error}</p>}</div>
   if (loading) return <div className="editor-loading" aria-label="Preparing LaTeX source" aria-busy="true"><div className="loading-caption">Reading between the lines…</div>{[72, 45, 61, 0, 85, 68, 48, 0, 74, 39].map((width, index) => <div className="skeleton-row" key={index}><span>{index + 1}</span><i style={{ width: `${width}%`, animationDelay: `${index * 60}ms` }} /></div>)}</div>
   if (view === 'pdf') {
     if (job?.previewStatus === 'READY' && !dirty) return <Suspense fallback={<div className="preview-empty">Loading PDF viewer…</div>}><PdfPreview key={`${job.id}-${job.revision}`} id={job.id} revision={job.revision} /></Suspense>

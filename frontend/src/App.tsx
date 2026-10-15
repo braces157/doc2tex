@@ -244,6 +244,22 @@ export default function App() {
     setHistory(previous => previous.map(item => item.id === next.id ? next : item))
   }
 
+  const restoreVersion = async (version: number) => {
+    if (!job || missingDocument || !sourceDocument.ready || sourceDocument.recovery || saving || compiling || busy || !(await confirmDiscard())) return false
+    setSaving(true); setError('')
+    try {
+      const result = await api<{ job: Job; source: string }>(`/jobs/${job.id}/versions/${version}/restore`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: sourceDocument.revision }),
+      })
+      if (currentId.current !== result.job.id) return false
+      setJob(result.job); sourceDocument.markSaved(result.job, result.source)
+      setHistory(previous => previous.map(item => item.id === result.job.id ? result.job : item))
+      setView('source'); toast.success(`Version ${version} restored as version ${result.job.revision}`)
+      return true
+    } catch (error) { noteMissing(job.id, error); throw error }
+    finally { setSaving(false) }
+  }
+
   const deleted = (removed: Job) => {
     // This callback runs only after the server confirms all job-owned files are gone.
     try { clearJobDrafts(removed.id) }
@@ -265,6 +281,8 @@ export default function App() {
       sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
       recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,
       missingDocument, renamed, deleted,
+      versionsAvailable: completed && sourceDocument.ready && !sourceDocument.recovery && !missingDocument && !busy,
+      restoreVersion,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
       selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),

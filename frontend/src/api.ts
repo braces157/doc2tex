@@ -28,6 +28,24 @@ export interface LibraryPage {
   total: number
 }
 
+export interface SavedVersion {
+  revision: number
+  createdAt: string
+  bytes: number
+  origin: 'converted' | 'legacy' | 'saved' | 'restored'
+  restoredFrom: number
+}
+
+export interface SavedHistory {
+  items: SavedVersion[]
+  currentRevision: number
+  firstRevision: number
+  legacyHistoryUnavailable: boolean
+  maxVersions: number
+  maxBytes: number
+  bytesUsed: number
+}
+
 export interface ConversionReview {
   elements: Record<string, number>
   findings: {code: string; severity: 'info' | 'warning'; title: string; detail: string}[]

@@ -207,6 +207,50 @@ class HardDocumentTest {
         return Normalizer.normalize(text, Normalizer.Form.NFC).replaceAll("[\\s\\p{Z}]+", "");
     }
 
+    @Test void restoredSavedVersionBuildsItsOwnPdfAndExportsCurrentText() throws Exception {
+        assumeTrue(Boolean.getBoolean("doc2tex.test-pdf"), "Enable with -Ddoc2tex.test-pdf=true");
+        assumeTrue(tools.available(tools.tectonic()));
+        Job job = convert("research-complex.docx", "article");
+        String original = service.source(job.id());
+        String first = original.replace("\\end{document}", "\\par Restored history checkpoint.\n\\end{document}");
+        service.saveSource(job.id(), first, 0);
+        service.saveSource(job.id(), first.replace("Restored history checkpoint.", "Abandoned later text."), 1);
+        Job restored = service.restore(job.id(), 1, 2);
+        assertEquals(3, restored.revision()); assertEquals("NOT_REQUESTED", restored.previewStatus());
+        service.preview(job.id());
+        long deadline = System.nanoTime() + 310_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            job = store.get(job.id());
+            if (List.of("READY", "FAILED").contains(job.previewStatus())) break;
+            Thread.sleep(100);
+        }
+        Path evidence = Path.of(System.getProperty("doc2tex.build-directory", "target"), "fidelity-evidence", "restored-history");
+        Files.createDirectories(evidence);
+        Files.writeString(evidence.resolve("compiler.log"), service.compilerLog(job.id()));
+        assertEquals("READY", job.previewStatus(), service.compilerLog(job.id()));
+        Files.copy(service.pdf(job.id()), evidence.resolve("main.pdf"), StandardCopyOption.REPLACE_EXISTING);
+        Files.writeString(evidence.resolve("main.tex"), service.source(job.id()));
+        try (var pdf = Loader.loadPDF(service.pdf(job.id()).toFile())) {
+            String extracted = new PDFTextStripper().getText(pdf);
+            Files.writeString(evidence.resolve("pdf-text.txt"), extracted);
+            String text = compact(extracted);
+            assertTrue(text.contains(compact("Restored history checkpoint.")));
+            assertFalse(text.contains(compact("Abandoned later text.")));
+        }
+        var bytes = new ByteArrayOutputStream(); service.writeArchive(job.id(), bytes);
+        boolean found = false;
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                assertFalse(entry.getName().contains(".versions"));
+                if (entry.getName().equals("main.tex")) {
+                    found = true; assertEquals(first, new String(zip.readAllBytes(), StandardCharsets.UTF_8));
+                }
+            }
+        }
+        assertTrue(found); assertEquals(original, service.versionSource(job.id(), 0));
+    }
+
     @Test void sourceInspectionRejectsXmlEntitiesWithoutResolvingThem() throws Exception {
         Path zip = Files.createTempFile("doc2tex-xxe-", ".docx");
         try (var output = new java.util.zip.ZipOutputStream(Files.newOutputStream(zip))) {
