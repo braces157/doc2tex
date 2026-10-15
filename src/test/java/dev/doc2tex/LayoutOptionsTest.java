@@ -94,6 +94,30 @@ class LayoutOptionsTest {
         } finally { service.stop(); }
     }
 
+    @ParameterizedTest @CsvSource({"layout.fontSize,abc", "layout.paper,legal"})
+    void damagedLayoutKeepsSourceOriginalAndDeletionRecoveryAvailable(String key, String value) throws Exception {
+        var store = new JobStore(properties()); store.load();
+        Job job = new Job(UUID.randomUUID().toString(), "damaged-layout.docx", "article", "COMPLETED", "NOT_REQUESTED", "", "", Instant.now(), Instant.now(), 100, 0);
+        store.save(job); Path project = store.directory(job.id()); Files.createDirectories(project.resolve("output"));
+        String source = "\\begin{document}\nPRESERVE_LAYOUT_RECOVERY\n\\end{document}"; byte[] original = SampleDocument.create();
+        Files.write(project.resolve("input.docx"), original); Files.writeString(project.resolve("output/main.tex"), source); store.versions().initialize(job, project, false);
+        var metadata = new Properties(); Path file = project.resolve("job.properties");
+        try (var input = Files.newInputStream(file)) { metadata.load(input); }
+        metadata.setProperty(key, value); try (var output = Files.newOutputStream(file)) { metadata.store(output, "Synthetic damaged layout"); }
+        var restarted = new JobStore(properties()); restarted.load();
+        assertEquals(1, restarted.list().size()); assertEquals(LayoutOptions.defaults(), restarted.get(job.id()).layout());
+        var service = service(restarted);
+        try {
+            assertEquals(source, service.source(job.id())); assertEquals(1, service.versions(job.id()).items().size());
+            var download = new ByteArrayOutputStream(); service.writeOriginal(job.id(), download); assertArrayEquals(original, download.toByteArray());
+        } finally { service.stop(); }
+        Path marker = directory.resolve(".deletions").resolve(job.id() + ".properties"); Files.createDirectories(marker.getParent());
+        try (var output = Files.newOutputStream(marker)) { metadata.store(output, "Synthetic interrupted deletion with damaged layout"); }
+        var deletionRecovery = new JobStore(properties()); deletionRecovery.load();
+        assertTrue(deletionRecovery.list().getFirst().deletionPending()); assertEquals(HttpStatus.GONE, assertThrows(ApiException.class, () -> deletionRecovery.get(job.id())).status);
+        deletionRecovery.delete(job.id()); assertTrue(deletionRecovery.list().isEmpty()); assertFalse(Files.exists(project)); assertFalse(Files.exists(marker));
+    }
+
     @ParameterizedTest @CsvSource({"article,a4,11,20", "report,letter,12,30", "article,letter,10,25.4", "report,a4,11,15"})
     void selectedLayoutAndEscapedUnicodeMetadataProduceRealPdf(String template, String paper, int font, String margin) throws Exception {
         var tools = new Tools(properties()); assumeTrue(Boolean.getBoolean("doc2tex.test-pdf")); assumeTrue(tools.available(tools.pandoc()) && tools.available(tools.tectonic()));

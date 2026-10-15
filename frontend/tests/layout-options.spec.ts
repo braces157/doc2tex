@@ -79,6 +79,15 @@ test('a new upload carries a generic preset and Unicode metadata, and reload res
   await expect(page.getByRole('combobox', { name: 'Paper size', exact: true })).toHaveValue('a4'); await expect(page.getByLabel('Margins (mm)', { exact: true })).toHaveValue('22.5')
   await page.locator('.ui-layout-options').screenshot({ path: testInfo.outputPath('layout-options.png') })
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+  await page.getByRole('button', { name: 'New conversion', exact: true }).click()
+  await expect(page.getByLabel('Document title', { exact: true })).toHaveValue('')
+  await expect(page.getByLabel('Author', { exact: true })).toHaveValue(''); await expect(page.getByLabel('Date text', { exact: true })).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: 'Paper size', exact: true })).toHaveValue('letter')
+  await expect(page.getByRole('combobox', { name: 'Font size', exact: true })).toHaveValue('10')
+  await expect(page.getByLabel('Margins (mm)', { exact: true })).toHaveValue('25.4')
+  await page.getByLabel('Upload Word document', { exact: true }).setInputFiles({ name: 'fresh.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from('synthetic fresh upload') })
+  await page.getByRole('button', { name: 'Convert to LaTeX', exact: true }).click(); await expect(editor(page)).toHaveText(SOURCE, { useInnerText: true })
+  expect(state.uploads).toBe(2); expect(state.uploadedLayout).toEqual(DEFAULT_LAYOUT)
 })
 
 test('presets preserve dirty edits, cancellation writes nothing, and a layout copy keeps the saved parent', async ({ page }) => {

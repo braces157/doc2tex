@@ -14,6 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 /** Validated conversion inputs, never interpreted as user-provided TeX. */
 public record LayoutOptions(String paper, BigDecimal fontSize, BigDecimal marginMm, String title, String author, String date) {
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(LayoutOptions.class);
 
     public LayoutOptions {
         if (!List.of("a4", "letter").contains(paper == null ? "" : paper) || fontSize == null
@@ -46,10 +47,14 @@ public record LayoutOptions(String paper, BigDecimal fontSize, BigDecimal margin
 
     static LayoutOptions read(Properties properties) {
         var fallback = defaults();
-        return new LayoutOptions(properties.getProperty("layout.paper", fallback.paper()),
+        try { return new LayoutOptions(properties.getProperty("layout.paper", fallback.paper()),
                 new BigDecimal(properties.getProperty("layout.fontSize", fallback.fontSize().toPlainString())),
                 new BigDecimal(properties.getProperty("layout.marginMm", fallback.marginMm().toPlainString())),
-                properties.getProperty("layout.title", ""), properties.getProperty("layout.author", ""), properties.getProperty("layout.date", ""));
+                properties.getProperty("layout.title", ""), properties.getProperty("layout.author", ""), properties.getProperty("layout.date", "")); }
+        catch (RuntimeException exception) {
+            LOG.warn("Invalid persisted layout settings; using legacy defaults. Saved source and history are unchanged.");
+            return fallback;
+        }
     }
 
     void write(Properties properties) {

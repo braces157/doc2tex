@@ -217,6 +217,7 @@ export default function App() {
     rememberJob(null)
     setReviewResult(null)
     setJob(null); setFile(null); setError(''); setView('source')
+    setLayout({ ...DEFAULT_LAYOUT })
   }
 
   const trySample = async () => {
