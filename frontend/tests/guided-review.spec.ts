@@ -124,8 +124,22 @@ test('delayed review data cannot replace a newer saved revision or its decisions
   // Model a transport that delivers a response despite cancellation, exercising late-result guards.
   await page.addInitScript(() => {
     const fetch = window.fetch.bind(window)
-    window.fetch = (input, options) => typeof input === 'string' && /\/api\/jobs\/[^/]+\/review$/.test(input)
-      ? fetch(input, { ...options, signal: undefined }) : fetch(input, options)
+    window.fetch = async (input, options) => {
+      if (typeof input !== 'string' || !/\/api\/jobs\/[^/]+\/review$/.test(input)) return fetch(input, options)
+      const response = await fetch(input, { ...options, signal: undefined })
+      const json = response.json.bind(response)
+      response.json = async () => {
+        const data = await json() as ConversionReview
+        if (data.revision === 1) {
+          // A timer follows the body/API promise microtasks; two render turns follow queued React work.
+          setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+            document.documentElement.dataset.lateReviewConsumed = '1'
+          })), 0)
+        }
+        return data
+      }
+      return response
+    }
   })
   const state = await setup(page); let release!: () => void
   await page.getByRole('tab', { name: /^Review/ }).click(); await expect(caption(page)).toBeVisible()
@@ -139,6 +153,7 @@ test('delayed review data cannot replace a newer saved revision or its decisions
   await page.getByRole('tab', { name: /^Review/ }).click(); await expect(page.getByText(/Saved source revision 2\./)).toBeVisible()
   const lateResponse = page.waitForResponse(async response => new URL(response.url()).pathname === `/api/jobs/${ID}/review` && (await response.json() as ConversionReview).revision === 1)
   release(); expect((await (await lateResponse).json() as ConversionReview).revision).toBe(1)
+  await expect(page.locator('html')).toHaveAttribute('data-late-review-consumed', '1')
   await expect(page.getByText(/Saved source revision 2\./)).toBeVisible()
   await caption(page).getByRole('button', { name: 'Mark reviewed', exact: true }).click(); await expect(caption(page)).toContainText('Reviewed · revision 2')
   expect(state.stored[0].revision).toBe(2)
