@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible conversion, setup, or interface problem.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "Use synthetic documents and sanitized logs. Report vulnerabilities through the Security tab, not a public issue."
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the expected behavior and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal synthetic DOCX when possible. Remove private content and metadata.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Windows 11, Java 21, Node 24, Pandoc 3.12.1, Tectonic 0.17.0"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove tokens, usernames, private paths, and personal document names.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I checked that this report and its attachments contain no private documents or credentials.
+          required: true

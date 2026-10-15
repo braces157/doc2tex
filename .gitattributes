@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=lf
+*.sh text eol=lf
+LICENSES/** -whitespace
+*.docx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.woff2 binary

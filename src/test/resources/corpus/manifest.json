@@ -1,0 +1,82 @@
+[
+  {
+    "file": "research-complex.docx",
+    "mustContain": [
+      "PRESERVE_RESEARCH_START",
+      "PRESERVE_TABLE_END",
+      "PRESERVE_FOOTNOTE",
+      "PRESERVE_RESEARCH_FINISH"
+    ],
+    "features": [
+      "fractions",
+      "radicals",
+      "matrix",
+      "merged tables",
+      "nested lists",
+      "footnote",
+      "hyperlink",
+      "PNG figure"
+    ],
+    "previewExpected": "clean"
+  },
+  {
+    "file": "multilingual.docx",
+    "mustContain": [
+      "Café, naïve, œuvre, déjà vu.",
+      "Tiếng Việt và những quan sát mới.",
+      "Ελληνικά και επιστήμη.",
+      "Научные наблюдения и результаты.",
+      "ภาษาไทยและการทดลอง",
+      "科学研究与实验结果",
+      "研究と実験の結果",
+      "اللغة العربية ونتائج البحث",
+      "PRESERVE_UNICODE_FINISH"
+    ],
+    "features": [
+      "French",
+      "Vietnamese",
+      "Greek",
+      "Russian",
+      "Thai",
+      "Chinese",
+      "Japanese",
+      "Arabic"
+    ],
+    "previewExpected": "font review required"
+  },
+  {
+    "file": "revisions-layout.docx",
+    "mustContain": [
+      "PRESERVE_ACCEPTED_DECISION",
+      "PRESERVE_OPERATIONS_FINISH"
+    ],
+    "mustNotContain": [
+      "REMOVED_OLD_DECISION"
+    ],
+    "features": [
+      "tracked insertions and deletions",
+      "header/footer",
+      "VML text box",
+      "chart part",
+      "comments"
+    ],
+    "previewExpected": "layout review required"
+  },
+  {
+    "file": "long-register.docx",
+    "mustContain": [
+      "PRESERVE_SECTION_001",
+      "PRESERVE_SECTION_020",
+      "PRESERVE_SECTION_040",
+      "R090",
+      "PRESERVE_LARGE_FINISH"
+    ],
+    "features": [
+      "40 sections",
+      "90-row table",
+      "repeated table headers",
+      "multi-page output"
+    ],
+    "previewExpected": "clean"
+  }
+]
