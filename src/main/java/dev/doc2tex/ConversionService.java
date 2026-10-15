@@ -261,7 +261,39 @@ class ConversionService {
         Job job = store.get(id);
         Path directory = store.directory(id);
         Path log = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
-        return inspector.review(directory.resolve("input.docx"), log);
+        var detected = inspector.review(directory.resolve("input.docx"), log);
+        String source = null;
+        if (job.status().equals("COMPLETED")) try {
+            store.requireHistory(id);
+            source = new String(store.versions().current(job, directory), StandardCharsets.UTF_8);
+        } catch (IOException | RuntimeException ignored) { /* Original text remains useful when saved source/history is unavailable. */ }
+        var evidence = ReviewEvidence.inspect(directory.resolve("input.docx"), source, job.revision());
+        List<ReviewDecisions.Decision> decisions = List.of(); String decisionError = "";
+        try { decisions = ReviewDecisions.apply(ReviewDecisions.load(directory), evidence.items(), job.revision()); }
+        catch (IOException | RuntimeException exception) { decisionError = "Saved review decisions could not be read. Back up this project's storage before repairing review-decisions.json. Detected risks and original text remain available."; }
+        return new DocumentInspector.Review(detected.elements(), detected.findings(), detected.compilerWarnings(), detected.scripts(), detected.scope(),
+                job.revision(), evidence.paragraphs(), evidence.items(), decisions, evidence.truncated(), decisionError);
+    }
+
+    DocumentInspector.Review decide(String id, String findingId, int revision, String status, String fingerprint) throws IOException {
+        if (!ReviewDecisions.hex(findingId) || !ReviewDecisions.hex(fingerprint) || status == null || !List.of("reviewed", "needs-work", "unreviewed").contains(status))
+            throw bad("Choose a valid review finding and decision.");
+        try (var operation = store.edit(id)) {
+            Job job = ready(id);
+            if (job.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed. Reload the review before recording a decision.");
+            if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) throw new ApiException(HttpStatus.CONFLICT, "Wait for the PDF build before recording a review decision.");
+            store.versions().current(job, store.directory(id)); // Decisions require verified saved-source evidence, even for an unmapped original excerpt.
+            var review = reviewLocked(id);
+            var item = review.items().stream().filter(finding -> finding.id().equals(findingId)).findFirst()
+                    .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "This finding is unavailable. Reload the conversion review."));
+            if (!item.fingerprint().equals(fingerprint)) throw new ApiException(HttpStatus.CONFLICT, "The finding evidence changed. Reload the review before recording a decision.");
+            Path directory = store.directory(id); var stored = ReviewDecisions.load(directory);
+            if (status.equals("unreviewed")) stored.remove(findingId);
+            else stored.put(findingId, new ReviewDecisions.Stored(findingId, status, revision, fingerprint, Instant.now()));
+            ReviewDecisions.save(directory, stored);
+            return new DocumentInspector.Review(review.elements(), review.findings(), review.compilerWarnings(), review.scripts(), review.scope(), review.revision(),
+                    review.originalText(), review.items(), ReviewDecisions.apply(stored, review.items(), revision), review.originalTruncated(), "");
+        }
     }
 
     Path pdf(String id) {

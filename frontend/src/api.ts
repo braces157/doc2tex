@@ -51,6 +51,23 @@ export interface ConversionReview {
   findings: {code: string; severity: 'info' | 'warning'; title: string; detail: string}[]
   compilerWarnings: string[]
   scope: string
+  revision?: number
+  originalText?: OriginalParagraph[]
+  items?: ReviewItem[]
+  decisions?: ReviewDecision[]
+  originalTruncated?: boolean
+  decisionError?: string
+}
+
+export interface OriginalParagraph { part: string; location: string; text: string; truncated: boolean }
+export interface ReviewItem {
+  id: string; code: string; title: string; part: string; location: string; excerpt: string; excerptTruncated: boolean
+  mapping: { status: 'matched' | 'unavailable'; line: number | null; reason: string; sourceExcerpt: string }
+  fingerprint: string
+}
+export interface ReviewDecision {
+  findingId: string; status: 'reviewed' | 'needs-work'; revision: number; fingerprint: string; updatedAt: string
+  applicable: boolean; carried: boolean; applicableRevision: number; reason: string
 }
 
 export interface CompilerDiagnostic {
