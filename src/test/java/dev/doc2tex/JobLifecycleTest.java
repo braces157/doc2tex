@@ -174,4 +174,41 @@ class JobLifecycleTest {
             assertEquals("Saved Unicode text ภาษาไทย", Files.readString(moved.resolve("output/main.tex")));
         } finally { Files.delete(root); }
     }
+
+    @Test void compilationGuardAllowsReadsAndPromptlyRejectsSaveWithoutStaleReadyState() throws Exception {
+        JobStore store = store(); Job job = create(store);
+        Path root = store.directory(job.id());
+        Files.write(root.resolve("input.docx"), SampleDocument.create());
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Tools tools = new Tools(properties()) { @Override boolean available(String command) { return true; } };
+        ToolRunner runner = new ToolRunner() {
+            @Override Result run(List<String> command, Path output, Path log, int timeout) throws IOException, InterruptedException {
+                entered.countDown();
+                if (!release.await(10, TimeUnit.SECONDS)) throw new IOException("Compiler gate timed out");
+                Path preview = Path.of(command.get(command.indexOf("--outdir") + 1));
+                Files.writeString(preview.resolve("main.pdf"), "Synthetic compiler output");
+                return new Result(0, "");
+            }
+        };
+        ConversionService service = new ConversionService(store, tools, runner, new DocxValidator(), properties(), new DocumentInspector(), new FontSupport());
+        try {
+            service.preview(job.id());
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+                assertEquals("Saved Unicode text ภาษาไทย", service.source(job.id()));
+                service.review(job.id()); service.compilerLog(job.id());
+                assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class,
+                        () -> service.saveSource(job.id(), "Do not save during compilation", job.revision())).status);
+                assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class, () -> store.delete(job.id())).status);
+            });
+            assertEquals(job.revision(), store.get(job.id()).revision());
+            release.countDown();
+            service.stop(); // Joins the worker, including its final status persistence and guard release.
+            assertEquals("READY", store.get(job.id()).previewStatus());
+            Job saved = service.saveSource(job.id(), "New text after compilation", job.revision());
+            assertEquals(job.revision() + 1, saved.revision());
+            assertEquals("NOT_REQUESTED", saved.previewStatus());
+            assertEquals("New text after compilation", service.source(job.id()));
+        } finally { release.countDown(); service.stop(); }
+    }
 }

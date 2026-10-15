@@ -82,7 +82,7 @@ class ConversionService {
     }
 
     private void convert(String id) {
-        try (var operation = store.edit(id)) { convertLocked(id); }
+        try (var operation = store.worker(id)) { convertLocked(id); }
     }
 
     private void convertLocked(String id) {
@@ -159,7 +159,7 @@ class ConversionService {
     }
 
     private void compile(String id) {
-        try (var operation = store.edit(id)) { compileLocked(id); }
+        try (var operation = store.worker(id)) { compileLocked(id); }
     }
 
     private void compileLocked(String id) {

@@ -111,10 +111,21 @@ class JobStore {
     Operation read(String id) { return acquire(id, false); }
     Operation edit(String id) { return acquire(id, true); }
 
+    Operation worker(String id) {
+        // The shared worker guard excludes source mutations/deletion, but allows
+        // compatible source/log/review reads throughout the tool run. Keep it
+        // through final status persistence: there is no unlock/relock gap.
+        Lock lock = lockFor(id).readLock();
+        lock.lock(); // Only short file/metadata edits can hold the exclusive lease.
+        try { get(id); return new Operation(lock); }
+        catch (RuntimeException exception) { lock.unlock(); throw exception; }
+    }
+
     private Operation acquire(String id, boolean edit) {
         var lifecycle = lockFor(id);
         Lock lock = edit ? lifecycle.writeLock() : lifecycle.readLock();
-        lock.lock();
+        if (!lock.tryLock()) throw new ApiException(HttpStatus.CONFLICT,
+                "The document is busy. Wait for conversion, PDF compilation, or a download to finish, then retry.");
         try { get(id); return new Operation(lock); }
         catch (RuntimeException exception) { lock.unlock(); throw exception; }
     }
