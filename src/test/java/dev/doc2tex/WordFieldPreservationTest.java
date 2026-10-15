@@ -52,5 +52,9 @@ class WordFieldPreservationTest {
         var reference = JsonMapper.builder().build().readTree(ast).path("meta").path("references").path("c").get(0).path("c");
         assertEquals("doe2020", reference.path("id").path("c").asString());
         assertEquals("MetaInlines", reference.path("title").path("t").asString());
+        assertEquals("x".repeat(2200), reference.path("note").path("c").asString());
+        var author = reference.path("author").path("c").get(0).path("c");
+        assertEquals("Doe", author.path("family").path("c").asString());
+        assertEquals("Jane", author.path("given").path("c").asString());
     }
 }
