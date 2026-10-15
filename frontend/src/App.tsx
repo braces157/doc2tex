@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import type { ConversionReview, Job, SystemStatus } from './api'
-import { api, downloadText, isWorking, isMissingDocument } from './api'
+import type { ConversionReview, Job, LayoutOptions, SystemStatus } from './api'
+import { api, DEFAULT_LAYOUT, downloadText, isWorking, isMissingDocument, validLayout } from './api'
 import { WorkspaceView } from './WorkspaceView'
 import { useDiscardConfirmation } from './components/DiscardConfirmation'
 import { useSourceDocument } from './useSourceDocument'
@@ -17,6 +17,7 @@ export default function App() {
   const [job, setJob] = useState<Job | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [template, setTemplate] = useState('article')
+  const [layout, setLayout] = useState<LayoutOptions>({ ...DEFAULT_LAYOUT })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -80,6 +81,7 @@ export default function App() {
           const previous = await api<Job>(`/jobs/${encodeURIComponent(id)}`, { signal: controller.signal })
           if (!controller.signal.aborted && navigationVersion.current === initialNavigation) {
             currentId.current = previous.id; setJob(previous); setTemplate(previous.template)
+            setLayout(previous.layout ?? { ...DEFAULT_LAYOUT })
           }
         } catch (e) {
           if (!controller.signal.aborted && navigationVersion.current === initialNavigation)
@@ -162,17 +164,20 @@ export default function App() {
   }
 
   const startConversion = async (selected = file) => {
+    if (!validLayout(layout)) { setError('Choose valid layout options before converting.'); return }
     if (!selected || switchingDisabled || !(await confirmDiscard())) return
     setBusy(true); setError('')
     try {
       const body = new FormData()
       body.append('file', selected); body.append('template', template)
+      body.append('layout', JSON.stringify(layout))
       const next = await api<Job>('/jobs', { method: 'POST', body })
       sourceDocument.discardEdits()
       navigationVersion.current++
       currentId.current = next.id
       rememberJob(next.id)
       setJob(next); setReviewResult(null); setView('source')
+      setLayout(next.layout ?? layout)
       setHistory(previous => [next, ...previous.filter(item => item.id !== next.id)])
     } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed. Try again.') }
     finally { setBusy(false) }
@@ -185,6 +190,24 @@ export default function App() {
     rememberJob(next.id)
     setReviewResult(null)
     setJob(next); setFile(null); setTemplate(next.template); setError(''); setView('source')
+    setLayout(next.layout ?? { ...DEFAULT_LAYOUT })
+  }
+
+  const copyLayout = async () => {
+    if (!job || missingDocument || !sourceDocument.ready || sourceDocument.recovery || dirty || switchingDisabled || compiling || !validLayout(layout)) return false
+    setBusy(true); setError('')
+    try {
+      const next = await api<Job>(`/jobs/${job.id}/layout-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revision: job.revision, template, layout }) })
+      if (currentId.current !== job.id) return false
+      navigationVersion.current++; currentId.current = next.id; rememberJob(next.id)
+      setJob(next); setFile(null); setReviewResult(null); setView('source')
+      setLayout(next.layout ?? layout)
+      setHistory(previous => [next, ...previous.filter(item => item.id !== next.id)])
+      toast.success('Created a separate layout copy from the original Word document')
+      return true
+    } catch (error) { noteMissing(job.id, error); throw error }
+    finally { setBusy(false) }
   }
 
   const reset = async () => {
@@ -194,6 +217,7 @@ export default function App() {
     rememberJob(null)
     setReviewResult(null)
     setJob(null); setFile(null); setError(''); setView('source')
+    setLayout({ ...DEFAULT_LAYOUT })
   }
 
   const trySample = async () => {
@@ -361,7 +385,7 @@ export default function App() {
   }, [])
 
   return <>
-    <WorkspaceView model={{ system, history, job, file, template, source, sourceLoading, error, saving,
+    <WorkspaceView model={{ system, history, job, file, template, layout, setLayout, copyLayout, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
       sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
       recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,

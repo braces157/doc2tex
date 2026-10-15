@@ -13,6 +13,12 @@ class FontSupport {
     private final Path fonts = Path.of(System.getenv().getOrDefault("DOC2TEX_FONT_DIR", ".tools/fonts")).toAbsolutePath();
 
     void prepare(DocumentInspector.Review review, Path output, List<String> command) throws IOException {
+        prepare(review, output, command, "");
+    }
+
+    void prepare(DocumentInspector.Review review, Path output, List<String> command, String metadata) throws IOException {
+        var scripts = new java.util.LinkedHashSet<>(review.scripts()); DocumentInspector.detectScripts(metadata, scripts);
+        review = new DocumentInspector.Review(review.elements(), review.findings(), review.compilerWarnings(), List.copyOf(scripts), review.scope());
         if (review.scripts().isEmpty() || !Files.isRegularFile(fonts.resolve("NotoSerif-Regular.ttf"))) return;
         boolean thai = review.scripts().contains("thai");
         boolean arabic = review.scripts().contains("arabic");

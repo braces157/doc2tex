@@ -8,6 +8,7 @@ A local DOCX → LaTeX app built with **Spring Boot 4.1.1, Java 21+, React, Type
 
 - DOCX upload and drag and drop, up to 20 MB.
 - Article and report templates.
+- A4/Letter layout options, bounded font sizes/margins, literal title/author/date metadata, and separate layout copies that preserve edited projects.
 - Background conversion with two workers and a bounded queue.
 - Editable LaTeX source, save, copy, and `.tex` download.
 - Browser-local draft recovery, active-document restoration after reload, and retryable source loading.
@@ -111,7 +112,8 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 |---|---|---|
 | GET | `/api/system` | Tool availability, templates, upload limit |
 | GET | `/api/sample.docx` | Download the sample |
-| POST | `/api/jobs` | Multipart `file` and `template`; returns 202 and a job |
+| POST | `/api/jobs` | Multipart `file`, `template` and optional JSON-string `layout`; returns 202 and a job |
+| POST | `/api/jobs/{id}/layout-copy` | JSON `{ "revision": 1, "template": "report", "layout": {...} }`; creates a separate conversion from the original DOCX, returns 202 and its new job |
 | GET | `/api/jobs` | Most recent 30 jobs |
 | GET | `/api/library` | All stored jobs, filtered and paginated (see below) |
 | GET | `/api/jobs/{id}` | Conversion and preview status |
@@ -147,6 +149,16 @@ Before cleanup, a durable metadata copy is atomically written to `.deletions/{id
 Matching browser draft keys and this tab's active-job key are removed only after a successful delete response. Other tabs confirm the deletion on a browser storage notice or window focus; missing-document responses also disable save/build/export. Loaded text stays in memory with **Download unsaved text**, and any local recovery draft has **Download draft**. Download before leaving or reloading that tab. With browser storage disabled, a tab learns about deletion on focus or its next server request.
 
 Saving uses a revision check to prevent overwriting edits from another window. Saving is blocked while that job's preview is queued/compiling. Downloads include the latest saved source; the interface saves pending edits before exporting a ZIP or building a PDF.
+
+**Document layout:** Expand Layout options beside Article/Report. Generic paper selects Article, A4, 11 pt and 25 mm margins; Generic report selects Report, Letter, 12 pt and 25.4 mm margins. You can adjust these values and add a title, author and date before converting. Empty date text omits the date. Allowed paper sizes are `a4` and `letter`, font sizes are exactly 10/11/12 pt, and margins are 10–50 mm with at most one decimal. Title/author allow 200 characters each and date 80; control characters are rejected. Metadata is literal text, so Markdown and TeX commands are escaped rather than executed.
+
+The `layout` JSON object has `{ "paper": "a4", "fontSize": 11, "marginMm": 25, "title": "Paper title", "author": "Jane Doe", "date": "October 2026" }`. Jobs return these persisted settings and retain them across restart, rename, save and restore. Omitting upload options preserves the legacy Letter/10 pt/one-inch defaults. Existing projects keep their saved source and history; migration adds metadata defaults only.
+
+New conversion resets the layout form and clears the previous document's title/author/date. Invalid persisted layout values fall back to legacy defaults with a server warning; saved source/history and original downloads remain available, and deletion recovery can still finish. Incoming API options remain strictly validated.
+
+For an existing document, save pending source edits, choose options and select **Create layout copy**. The confirmation explains that the new project starts from the preserved original DOCX; edited LaTeX remains in the current project and is not carried into the copy. The parent revision is checked, a new job ID/version-0 history is created, and the parent source/versions remain unchanged. Cancel or a failed request keeps the current editor. Changing form options alone does not change saved source or job settings. To preserve manual body edits within a layout, edit the preamble manually in the existing source.
+
+Exports include `layout-settings.json` describing the initial conversion and README compiler instructions; later manual source changes take precedence. Title/author/date script detection participates in conditional Noto font bundling, even when the original body is English. Review flags multilingual metadata and compiler missing-glyph warnings remain available; unsupported scripts may require manual font settings. Compile with Tectonic or current XeLaTeX, keeping the exported media/fonts and licenses beside `main.tex`. The layout conversion filter itself is not needed for compilation.
 
 **Saved versions:** Open Saved versions beside Save changes to preview, download or restore earlier saves. New conversions keep the original generated source as version 0. Existing projects begin with a snapshot of their current saved revision; the dialog identifies that earlier overwritten history is unavailable. Restore checks the expected current revision, creates a new increasing revision, preserves earlier snapshots, invalidates the PDF and returns its matching source and metadata together. Unsaved changes require confirmation and are only discarded after a successful restore; failed/stale restores preserve local text and recovery drafts. Restore is blocked while PDF compilation is queued/running. Build a fresh PDF afterward.
 
