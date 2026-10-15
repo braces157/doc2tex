@@ -17,6 +17,10 @@ The Maven Wrapper is included; a system Maven installation is optional.
 npm --prefix frontend ci
 npm --prefix frontend run lint
 npm --prefix frontend run build
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+cd ..
 ./mvnw.cmd verify '-Ddoc2tex.test-pdf=true'
 ```
 
@@ -27,6 +31,13 @@ Use `./mvnw` on Linux/macOS. The full PDF suite needs Pandoc, Tectonic, and the 
 - Check the interface at desktop and mobile widths when editing UI code. Keep keyboard navigation and reduced-motion support working.
 - Update relevant documentation when changing setup, APIs, limits, or supported features.
 - Keep generated jobs, PDFs, credentials, tool binaries, and personal documents out of commits.
+
+## Automated pull request reviews
+
+CodeRabbit is configured to review ready pull requests and subsequent commits,
+with guidance tailored to conversion safety and preserving editor changes. See
+the [review bot guide](docs/pr-review.md) for GitHub app activation and review
+commands. Maintainers verify suggestions and make the final merge decision.
 
 ## Reproducing a conversion issue
 

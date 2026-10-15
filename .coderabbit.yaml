@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: >-
+  Be concise and specific. Prioritize actionable bugs, data loss, security, and
+  regressions. Explain the failing scenario and impact. Avoid style nitpicks
+  already covered by linters and speculative refactors.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  collapse_walkthrough: true
+  review_status: true
+  poem: false
+  in_progress_fortune: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+  path_filters:
+    - '!frontend/package-lock.json'
+    - '!frontend/dist/**'
+    - '!frontend/node_modules/**'
+    - '!target/**'
+    - '!.data/**'
+    - '!.tools/**'
+    - '!docs/assets/**'
+  path_instructions:
+    - path: 'src/main/java/**'
+      instructions: >-
+        Review against SECURITY.md and the single-user loopback deployment model.
+        Focus on archive traversal, ZIP expansion limits, XML external entities,
+        unsafe subprocess arguments, missing deadlines or process cleanup, queue
+        concurrency, and job persistence after restart. Pandoc and Tectonic must
+        retain their sandbox/untrusted flags. Check source, image, font, and ZIP
+        exports for content loss and unintended filesystem access. Do not assume
+        successful PDF compilation proves faithful conversion.
+    - path: 'frontend/src/**'
+      instructions: >-
+        Focus on losing unsaved LaTeX edits, stale asynchronous responses after
+        switching documents, failed loads overwriting source, draft recovery,
+        object URL and PDF worker cleanup, and API error handling. Preserve
+        keyboard navigation, accessible dialog focus, and reduced-motion support.
+        Follow existing React, TypeScript, and shadcn/Radix conventions.
+    - path: 'src/test/**'
+      instructions: >-
+        Require meaningful conversion assertions for changed behavior, including
+        content preservation and failure cases. Keep fixtures synthetic and free
+        of personal document metadata. Full PDF tests need real Pandoc, Tectonic,
+        and fonts; flag changes that silently skip these checks or weaken corpus
+        expectations without an intentional behavior change.
+    - path: 'frontend/tests/**'
+      instructions: >-
+        Prioritize observable browser behavior for edit preservation, failed
+        requests, document switching, draft recovery, and accessible interactions.
+        Flag timing-dependent waits and mocks that hide the regression under test.
+    - path: 'scripts/**'
+      instructions: >-
+        Check Windows PowerShell and Unix shell behavior, checksum verification,
+        pinned converter and font versions, safe quoting, and actionable failures.
+        Keep third-party notices and font redistribution licenses intact.
+    - path: '.github/workflows/**'
+      instructions: >-
+        Check least-privilege permissions, immutable action SHAs, untrusted pull
+        request inputs, and secret exposure. Preserve Windows and Linux validation
+        and real PDF regression coverage. Do not execute pull request code in a
+        privileged pull_request_target workflow.
+
+chat:
+  auto_reply: true

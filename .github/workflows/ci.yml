@@ -56,6 +56,11 @@ jobs:
         run: npm --prefix frontend run lint
       - name: Build frontend
         run: npm --prefix frontend run build
+      - name: Install browser test runtime
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Test draft recovery and request failures in the browser
+        run: npm --prefix frontend run test:e2e
       - name: Verify backend and real PDF conversions
         shell: bash
         run: ./mvnw -B verify -Ddoc2tex.test-pdf=true
@@ -74,4 +79,13 @@ jobs:
         with:
           name: test-reports-${{ runner.os }}
           path: target/surefire-reports/
+          retention-days: 14
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-reports-${{ runner.os }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
           retention-days: 14
