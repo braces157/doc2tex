@@ -19,7 +19,7 @@ const baseItems: ReviewItem[] = [
 async function setup(page: Page) {
   const job: Job = { id: ID, filename: 'research-complex.docx', template: 'article', status: 'COMPLETED', previewStatus: 'NOT_REQUESTED',
     message: 'Ready', previewMessage: '', createdAt: '2026-10-16T00:00:00Z', updatedAt: '2026-10-16T00:00:00Z', size: 100, revision: 0 }
-  const state = { job, source: SOURCE, stored: [] as ReviewDecision[], failDecision: false, gate: null as Promise<void> | null }
+  const state = { job, source: SOURCE, stored: [] as ReviewDecision[], failDecision: false, gate: null as Promise<void> | null, gateStarted: null as (() => void) | null }
   const report = (): ConversionReview => {
     const items = baseItems.map(item => {
       const changed = item.code === 'captions' && item.mapping.status === 'matched' && state.source.includes('Changed caption')
@@ -42,7 +42,7 @@ async function setup(page: Page) {
     if (path === '/api/library') return json({ items: [state.job], page: 0, size: 20, total: 1 })
     if (path === `/api/jobs/${ID}`) return json(state.job)
     if (path.endsWith('/diagnostics')) return json({ revision: null, status: 'NOT_REQUESTED', items: [], logTruncated: false, diagnosticsTruncated: false })
-    if (path.endsWith('/review')) { const data = report(), gate = state.gate; state.gate = null; if (gate) await gate; return json(data) }
+    if (path.endsWith('/review')) { const data = report(), gate = state.gate; state.gate = null; if (gate) { state.gateStarted?.(); await gate } return json(data) }
     if (path.includes('/review/decisions/')) {
       if (state.failDecision) return json({ message: 'Review storage temporarily unavailable.' }, 503)
       const body = request.postDataJSON() as { revision: number; status: ReviewDecision['status'] | 'unreviewed'; fingerprint: string }
@@ -121,13 +121,25 @@ test('failed decision writes retain source and warnings and offer review reload'
 })
 
 test('delayed review data cannot replace a newer saved revision or its decisions', async ({ page }) => {
+  // Model a transport that delivers a response despite cancellation, exercising late-result guards.
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window)
+    window.fetch = (input, options) => typeof input === 'string' && /\/api\/jobs\/[^/]+\/review$/.test(input)
+      ? fetch(input, { ...options, signal: undefined }) : fetch(input, options)
+  })
   const state = await setup(page); let release!: () => void
+  await page.getByRole('tab', { name: /^Review/ }).click(); await expect(caption(page)).toBeVisible()
+  await page.getByRole('tab', { name: 'Source', exact: true }).click()
+  const started = new Promise<void>(resolve => { state.gateStarted = resolve })
   state.gate = new Promise<void>(resolve => { release = resolve })
   await source(page).fill(SOURCE + '\n% first revision'); await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await started
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
   await source(page).fill(SOURCE + '\n% second revision'); await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await page.getByRole('tab', { name: /^Review/ }).click(); await expect(page.getByText(/Saved source revision 2\./)).toBeVisible()
-  release(); await expect(page.getByText(/Saved source revision 2\./)).toBeVisible()
+  const lateResponse = page.waitForResponse(async response => new URL(response.url()).pathname === `/api/jobs/${ID}/review` && (await response.json() as ConversionReview).revision === 1)
+  release(); expect((await (await lateResponse).json() as ConversionReview).revision).toBe(1)
+  await expect(page.getByText(/Saved source revision 2\./)).toBeVisible()
   await caption(page).getByRole('button', { name: 'Mark reviewed', exact: true }).click(); await expect(caption(page)).toContainText('Reviewed · revision 2')
   expect(state.stored[0].revision).toBe(2)
 })

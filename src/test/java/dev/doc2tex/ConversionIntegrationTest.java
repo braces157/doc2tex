@@ -78,7 +78,7 @@ class ConversionIntegrationTest {
     }
 
     @Test void reviewDecisionRoutePreservesRisksAndRejectsStaleOrInvalidEvidence() throws Exception {
-        assertTrue(tools.available(tools.pandoc()));
+        assumeTrue(tools.available(tools.pandoc()), "Install Pandoc to run the real review HTTP workflow");
         byte[] corpus;
         try (var input = getClass().getResourceAsStream("/corpus/research-complex.docx")) { assertNotNull(input); corpus = input.readAllBytes(); }
         Job job = await(upload("review-corpus.docx", corpus, "article")); assertEquals("COMPLETED", job.status());
