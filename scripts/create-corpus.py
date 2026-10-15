@@ -112,5 +112,12 @@ for index in range(1,91):
 doc.add_paragraph('PRESERVE_LARGE_FINISH')
 package(doc, 'long-register.docx')
 manifest.append({'file':'long-register.docx','mustContain':['PRESERVE_SECTION_001','PRESERVE_SECTION_020','PRESERVE_SECTION_040','R090','PRESERVE_LARGE_FINISH'],'features':['40 sections','90-row table','repeated table headers','multi-page output'],'previewExpected':'clean'})
+for case in manifest:
+    # Explicit PDF checkpoints avoid relying on script-specific extraction order.
+    case['pdfMustContain'] = [text for text in case['mustContain'] if text.startswith('PRESERVE_') or text == 'R090']
+    case['pdfMustNotContain'] = case.get('mustNotContain', [])
+    case['pdfMinPages'] = 2 if case['file'] == 'long-register.docx' else 1
+    if case['file'] == 'long-register.docx':
+        case['pdfLastPageMustContain'] = ['PRESERVE_LARGE_FINISH']
 (ROOT/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps([{'file':item['file'],'bytes':(ROOT/item['file']).stat().st_size} for item in manifest],indent=2))

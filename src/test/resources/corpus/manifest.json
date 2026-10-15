@@ -17,7 +17,15 @@
       "hyperlink",
       "PNG figure"
     ],
-    "previewExpected": "clean"
+    "previewExpected": "clean",
+    "pdfMustContain": [
+      "PRESERVE_RESEARCH_START",
+      "PRESERVE_TABLE_END",
+      "PRESERVE_FOOTNOTE",
+      "PRESERVE_RESEARCH_FINISH"
+    ],
+    "pdfMustNotContain": [],
+    "pdfMinPages": 1
   },
   {
     "file": "multilingual.docx",
@@ -42,7 +50,12 @@
       "Japanese",
       "Arabic"
     ],
-    "previewExpected": "font review required"
+    "previewExpected": "font review required",
+    "pdfMustContain": [
+      "PRESERVE_UNICODE_FINISH"
+    ],
+    "pdfMustNotContain": [],
+    "pdfMinPages": 1
   },
   {
     "file": "revisions-layout.docx",
@@ -60,7 +73,15 @@
       "chart part",
       "comments"
     ],
-    "previewExpected": "layout review required"
+    "previewExpected": "layout review required",
+    "pdfMustContain": [
+      "PRESERVE_ACCEPTED_DECISION",
+      "PRESERVE_OPERATIONS_FINISH"
+    ],
+    "pdfMustNotContain": [
+      "REMOVED_OLD_DECISION"
+    ],
+    "pdfMinPages": 1
   },
   {
     "file": "long-register.docx",
@@ -77,6 +98,18 @@
       "repeated table headers",
       "multi-page output"
     ],
-    "previewExpected": "clean"
+    "previewExpected": "clean",
+    "pdfMustContain": [
+      "PRESERVE_SECTION_001",
+      "PRESERVE_SECTION_020",
+      "PRESERVE_SECTION_040",
+      "R090",
+      "PRESERVE_LARGE_FINISH"
+    ],
+    "pdfMustNotContain": [],
+    "pdfMinPages": 2,
+    "pdfLastPageMustContain": [
+      "PRESERVE_LARGE_FINISH"
+    ]
   }
 ]

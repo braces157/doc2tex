@@ -72,6 +72,10 @@ Windows locks the executable JAR while it runs. Stop that server before packagin
 
 Tests cover input validation, archive traversal, persistence/restart recovery, actual Pandoc conversion of math/tables/images, article/report output, source edits, revision conflicts, and ZIP contents. Real conversion tests are skipped if Pandoc is not installed. PDF compilation is deliberately outside the default tests because its first run downloads TeX dependencies.
 
+The full PDF suite compiles all four corpus fixtures with both Article and Report. Test-only PDFBox extraction checks explicit `pdfMustContain`/`pdfMustNotContain` checkpoints in `manifest.json`, minimum page counts, and the long register's final-page checkpoint. The entire compiler log is checked for missing glyphs. ZIP checks verify saved source, review JSON, referenced images and Noto fonts, licenses, and byte-for-byte preservation of extracted media/font assets. These are specific content checks, not a guarantee of visual fidelity or correct extraction of every Unicode script.
+
+Generated PDFs, extracted text, and complete compiler logs are written to `target/fidelity-evidence/<template>/<fixture>/` (under the selected build directory when overridden). Windows/Linux CI uploads them as `pdf-fidelity-*` artifacts, including evidence produced before an assertion fails.
+
 Browser workflow tests use Playwright with Chromium at desktop and mobile widths. They start their own Vite server on port 4173 and mock API responses to exercise recovery, revision conflicts, storage failures, and failed uploads deterministically; real converter coverage remains in the backend suite. Run them with:
 
 ```powershell

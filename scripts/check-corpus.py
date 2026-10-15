@@ -69,12 +69,19 @@ def check(case):
     extracted='\n'.join(page.extract_text() or '' for page in reader.pages)
     (directory/'pdf-text.txt').write_text(extracted,encoding='utf-8')
     # Text checkpoints exclude math and Unicode extraction quirks; they supplement visual QA.
-    checkpoints=[value for value in case['mustContain'] if value.startswith('PRESERVE_') or value=='R090']
+    checkpoints=case['pdfMustContain']
+    assert checkpoints, 'The PDF checkpoint list must not be empty'
     # PDF extraction can insert spaces between kerned glyphs (e.g. "PRESER VE").
     compact_pdf=re.sub(r'\s+','',extracted)
     missing_pdf=[value for value in checkpoints if re.sub(r'\s+','',value) not in compact_pdf]
+    unexpected_pdf=[value for value in case['pdfMustNotContain'] if re.sub(r'\s+','',value) in compact_pdf]
+    assert len(reader.pages)>=case['pdfMinPages'], 'PDF lost expected pages'
+    last_page=re.sub(r'\s+','',reader.pages[-1].extract_text() or '')
+    missing_last=[value for value in case.get('pdfLastPageMustContain',[]) if re.sub(r'\s+','',value) not in last_page]
     missing_glyphs=log.count('Missing character:')
     assert not missing_pdf, f'PDF lost checkpoints: {missing_pdf}'
+    assert not unexpected_pdf, f'PDF retained deleted text: {unexpected_pdf}'
+    assert not missing_last, f'Final PDF page lost checkpoints: {missing_last}'
     assert missing_glyphs==0, 'PDF has missing glyphs'
     result={'file':filename,'jobId':job['id'],'conversionSeconds':convert_seconds,'pdfSeconds':compile_seconds,
             'pdfPages':len(reader.pages),'requiredSourceCheckpoints':len(case['mustContain']),

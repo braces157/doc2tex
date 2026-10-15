@@ -89,3 +89,10 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 14
+      - name: Upload PDF fidelity evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pdf-fidelity-${{ runner.os }}
+          path: target/fidelity-evidence/
+          retention-days: 14
