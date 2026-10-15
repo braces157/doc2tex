@@ -19,6 +19,13 @@ export interface SystemStatus {
   templates: string[]
 }
 
+export interface LibraryPage {
+  items: Job[]
+  page: number
+  size: number
+  total: number
+}
+
 export interface ConversionReview {
   elements: Record<string, number>
   findings: {code: string; severity: 'info' | 'warning'; title: string; detail: string}[]

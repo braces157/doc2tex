@@ -10,6 +10,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -63,7 +64,31 @@ class JobStore {
     }
 
     List<Job> list() {
-        return jobs.values().stream().sorted(Comparator.comparing(Job::createdAt).reversed()).limit(30).toList();
+        return jobs.values().stream().sorted(newestFirst()).limit(30).toList();
+    }
+
+    private Comparator<Job> newestFirst() {
+        return Comparator.comparing(Job::createdAt).reversed().thenComparing(Job::id);
+    }
+
+    record LibraryPage(List<Job> items, int page, int size, long total) {}
+
+    LibraryPage library(String query, String status, String sort, int page, int size) {
+        if (query.length() > 200 || page < 0 || size < 1 || size > 100
+                || !List.of("", "QUEUED", "CONVERTING", "COMPLETED", "FAILED").contains(status)
+                || !List.of("newest", "oldest").contains(sort)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Use a query up to 200 characters, a valid conversion status, newest/oldest sort, a non-negative page, and size 1–100.");
+        }
+        String term = query.strip().toLowerCase(Locale.ROOT);
+        Comparator<Job> order = sort.equals("newest") ? newestFirst()
+                : Comparator.comparing(Job::createdAt).thenComparing(Job::id);
+        // Capture one collection snapshot so the count and page describe the same results.
+        List<Job> matches = jobs.values().stream()
+                .filter(job -> job.filename().toLowerCase(Locale.ROOT).contains(term))
+                .filter(job -> status.isEmpty() || job.status().equals(status))
+                .sorted(order).toList();
+        List<Job> items = matches.stream().skip((long) page * size).limit(size).toList();
+        return new LibraryPage(items, page, size, matches.size());
     }
 
     Path directory(String id) {

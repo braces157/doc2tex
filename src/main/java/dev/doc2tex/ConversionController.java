@@ -32,6 +32,12 @@ class ConversionController {
 
     @GetMapping("/system") Map<String, Object> system() { return tools.status(); }
     @GetMapping("/jobs") List<Job> list() { return store.list(); }
+    @GetMapping("/library")
+    JobStore.LibraryPage library(@RequestParam(defaultValue = "") String query,
+            @RequestParam(defaultValue = "") String status, @RequestParam(defaultValue = "newest") String sort,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return store.library(query, status, sort, page, size);
+    }
     @GetMapping("/jobs/{id}") Job job(@PathVariable String id) { return store.get(id); }
     @GetMapping("/jobs/{id}/review") DocumentInspector.Review review(@PathVariable String id) { return service.review(id); }
 

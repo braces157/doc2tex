@@ -24,6 +24,7 @@ export default function App() {
   const [view, setView] = useState<'source' | 'pdf' | 'review'>('source')
   const [review, setReview] = useState<ConversionReview | null>(null)
   const currentId = useRef<string | null>(null)
+  const navigationVersion = useRef(0)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sourceDocument = useSourceDocument(job, setJob)
   const { source, dirty, loading: sourceLoading } = sourceDocument
@@ -44,15 +45,25 @@ export default function App() {
 
   useEffect(() => {
     const controller = new AbortController()
+    const initialNavigation = navigationVersion.current
     void Promise.all([api<SystemStatus>('/system', { signal: controller.signal }),
       api<Job[]>('/jobs', { signal: controller.signal })])
-      .then(([status, jobs]) => {
+      .then(async ([status, jobs]) => {
         if (controller.signal.aborted) return
         setSystem(status); setHistory(jobs)
+        let id: string | null
+        try { id = sessionStorage.getItem(ACTIVE_JOB) }
+        catch { return /* History remains available when session storage is disabled. */ }
+        if (!id) return
         try {
-          const previous = jobs.find(item => item.id === sessionStorage.getItem(ACTIVE_JOB))
-          if (previous && !currentId.current) { currentId.current = previous.id; setJob(previous); setTemplate(previous.template) }
-        } catch { /* History remains available without session storage. */ }
+          const previous = await api<Job>(`/jobs/${encodeURIComponent(id)}`, { signal: controller.signal })
+          if (!controller.signal.aborted && navigationVersion.current === initialNavigation) {
+            currentId.current = previous.id; setJob(previous); setTemplate(previous.template)
+          }
+        } catch (e) {
+          if (!controller.signal.aborted && navigationVersion.current === initialNavigation)
+            setError(e instanceof Error ? `Could not reopen your active document: ${e.message}` : 'Could not reopen your active document. Find it in All documents.')
+        }
       })
       .catch((e: Error) => { if (e.name !== 'AbortError') setError('Could not connect to the conversion service. Check that Spring Boot is running.') })
     return () => { controller.abort(); if (copyTimer.current) clearTimeout(copyTimer.current) }
@@ -116,6 +127,7 @@ export default function App() {
       body.append('file', selected); body.append('template', template)
       const next = await api<Job>('/jobs', { method: 'POST', body })
       sourceDocument.discardEdits()
+      navigationVersion.current++
       currentId.current = next.id
       rememberJob(next.id)
       setJob(next); setReview(null); setView('source')
@@ -126,6 +138,7 @@ export default function App() {
 
   const openJob = async (next: Job) => {
     if (switchingDisabled || next.id === job?.id || !(await discardChanges())) return
+    navigationVersion.current++
     currentId.current = next.id
     rememberJob(next.id)
     setReview(null)
@@ -134,6 +147,7 @@ export default function App() {
 
   const reset = async () => {
     if (switchingDisabled || !(await discardChanges())) return
+    navigationVersion.current++
     currentId.current = null
     rememberJob(null)
     setReview(null)
