@@ -14,6 +14,7 @@ A local DOCX → LaTeX app built with **Spring Boot 4.1.1, Java 21+, React, Type
 - ZIP export with `main.tex`, extracted images, and conversion messages.
 - PDF compilation and a PDF.js canvas viewer with page navigation and PDF download, requested separately from conversion.
 - Local conversion history that survives application restarts.
+- All documents library with filename search, status filters, creation-date sorting, and pagination across every saved conversion.
 - A built-in sample with a heading, emphasis, native Word math, a table, and an image.
 - Validation, inline errors, progress states, and a responsive interface.
 - Keyboard-accessible shadcn tabs, radio controls, tooltips, dialogs, toasts, and download menus.
@@ -112,6 +113,7 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 | GET | `/api/sample.docx` | Download the sample |
 | POST | `/api/jobs` | Multipart `file` and `template`; returns 202 and a job |
 | GET | `/api/jobs` | Most recent 30 jobs |
+| GET | `/api/library` | All stored jobs, filtered and paginated (see below) |
 | GET | `/api/jobs/{id}` | Conversion and preview status |
 | GET | `/api/jobs/{id}/review` | Detected source features, review flags, and PDF compiler warnings |
 | GET | `/api/jobs/{id}/source` | UTF-8 LaTeX source |
@@ -123,6 +125,8 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 
 Conversions: `QUEUED → CONVERTING → COMPLETED / FAILED`.
 Previews: `NOT_REQUESTED → QUEUED → COMPILING → READY / FAILED`.
+
+**All documents:** `GET /api/library?query=&status=&sort=newest&page=0&size=20` returns `{items, page, size, total}`. Filename matching is case-insensitive and trims surrounding query whitespace; filtering happens over the whole stored collection before pagination. `query` is limited to 200 characters. `status` is empty (all), `QUEUED`, `CONVERTING`, `COMPLETED`, or `FAILED`; `sort` is `newest` or `oldest`. Pages are zero-based, size is 1–100, and invalid parameters return 400. Creation-date ties sort by ascending job ID for both directions. Pages beyond the end return empty items with the actual total. The recent-history endpoint stays capped at 30. The workspace restores the active conversion by ID even when it is absent from recent history. Library selection uses the same unsaved-edit confirmation and draft recovery as recent documents.
 
 Saving uses a revision check to prevent overwriting edits from another window. Saving is blocked while that job's preview is queued/compiling. Downloads include the latest saved source; the interface saves pending edits before exporting a ZIP or building a PDF.
 

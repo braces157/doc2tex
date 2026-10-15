@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Map;
+import java.util.List;
 import java.util.zip.ZipInputStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,6 +51,23 @@ class ConversionIntegrationTest {
             Thread.sleep(100);
         }
         fail("Conversion timed out"); return job;
+    }
+
+    @Test void libraryRouteReturnsPagesAndRejectsInvalidParameters() throws Exception {
+        Job older = new Job(java.util.UUID.randomUUID().toString(), "library-only-résumé.docx", "report",
+                "COMPLETED", "NOT_REQUESTED", "", "", java.time.Instant.EPOCH, java.time.Instant.EPOCH, 20, 0);
+        store.save(older);
+        var result = client().get().uri(builder -> builder.path("/api/library")
+                .queryParam("query", "library-only").queryParam("status", "COMPLETED")
+                .queryParam("sort", "oldest").queryParam("page", 0).queryParam("size", 1).build())
+                .retrieve().body(JobStore.LibraryPage.class);
+        assertNotNull(result);
+        assertEquals(1, result.total()); assertEquals(1, result.size()); assertEquals(List.of(older), result.items());
+        for (String query : List.of("page=-1", "size=0", "size=101", "sort=sideways", "status=READY", "page=abc", "size=2147483648")) {
+            var error = assertThrows(HttpClientErrorException.class,
+                    () -> client().get().uri("/api/library?" + query).retrieve().toBodilessEntity());
+            assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode(), query);
+        }
     }
 
     @Test void convertsRealDocxWithMathTablesImagesAndSupportsEditing() throws Exception {

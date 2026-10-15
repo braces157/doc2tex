@@ -17,6 +17,7 @@ import { SourceWorkspace } from '@/SourceWorkspace'
 import { ConversionReview } from '@/components/ConversionReview'
 import { DraftRecovery } from '@/components/DraftRecovery'
 import type { Draft } from '@/drafts'
+import { DocumentLibrary } from '@/DocumentLibrary'
 
 export interface WorkspaceModel {
   system: SystemStatus | null; history: Job[]; job: Job | null; file: File | null; template: string
@@ -36,6 +37,7 @@ export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
   const warningCount = (m.review?.findings.filter(item => item.severity === 'warning').length ?? 0) + (m.review?.compilerWarnings.length ?? 0)
   const activeFilename = m.file?.name ?? m.job?.filename
   return <div className="ui-workspace">
@@ -51,7 +53,7 @@ export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
       <div className="ui-sidebar-bottom"><div className="ui-local-note"><span className="ui-local-dot" /><div><strong>On your machine</strong><p>Your documents stay local.</p></div></div><Button variant="ghost" className="ui-guide-button" onClick={() => setGuideOpen(true)}><Info size={16} />Conversion guide<ArrowUpRight size={14} /></Button><span className="ui-version">doc2TeX <span>v0.2 / local edition</span></span></div>
     </aside>
     <main className="ui-main" id="workspace-main">
-      <header className="ui-topbar"><div><span>Workspace</span><span className="ui-breadcrumb-divider">/</span><strong>{m.job ? m.job.filename : 'New conversion'}</strong></div><div><Button className="ui-mobile-history" variant="ghost" size="icon-sm" aria-label="Recent documents" onClick={() => setHistoryOpen(true)}><Clock size={17} /></Button><Tooltip><TooltipTrigger asChild><Badge variant="outline" className="ui-system-status"><span className={m.system?.pandoc ? 'available' : ''} />{m.system?.pandoc ? 'Ready to convert' : m.system ? 'Setup needed' : 'Connecting'}</Badge></TooltipTrigger><TooltipContent>{m.system?.pandoc ? 'The document converter is available on this machine.' : 'Checking the local conversion service.'}</TooltipContent></Tooltip></div></header>
+      <header className="ui-topbar"><div><span>Workspace</span><span className="ui-breadcrumb-divider">/</span><strong>{m.job ? m.job.filename : 'New conversion'}</strong></div><div><Button className="ui-library-trigger" variant="ghost" onClick={() => setLibraryOpen(true)}><FolderSimple size={17} />All documents</Button><Button className="ui-mobile-history" variant="ghost" size="icon-sm" aria-label="Recent documents" onClick={() => setHistoryOpen(true)}><Clock size={17} /></Button><Tooltip><TooltipTrigger asChild><Badge variant="outline" className="ui-system-status"><span className={m.system?.pandoc ? 'available' : ''} />{m.system?.pandoc ? 'Ready to convert' : m.system ? 'Setup needed' : 'Connecting'}</Badge></TooltipTrigger><TooltipContent>{m.system?.pandoc ? 'The document converter is available on this machine.' : 'Checking the local conversion service.'}</TooltipContent></Tooltip></div></header>
       <div className="ui-content">
         <section className="ui-intro"><div><span className="ui-eyebrow"><span />FROM FIRST DRAFT TO FINAL FORM</span><h1>Your words.<br /><span>Ready for their next chapter.</span></h1><p>Bring your Word document. Leave with LaTeX you can make your own.</p></div><div className="ui-format-illustration" aria-hidden="true"><div><FileDoc size={25} weight="light" /><span>DOCX</span></div><span className="ui-route-line" /><ArrowRight size={19} /><div><BracketsCurly size={25} weight="light" /><span>LaTeX</span></div></div></section>
         {m.system && !m.system.pandoc && <div className="ui-notice"><Info size={19} /><p><strong>Install the document converter.</strong> Run <code>scripts/setup-tools.ps1</code> and restart the app.</p></div>}
@@ -83,6 +85,7 @@ export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
         <footer className="ui-footer"><span><BracketsCurly size={16} />A little less formatting. A little more thinking.</span><button onClick={() => setGuideOpen(true)}>What converts well <ArrowUpRight size={13} /></button></footer>
       </div>
     </main>
+    <DocumentLibrary open={libraryOpen} onOpenChange={setLibraryOpen} onSelect={m.openJob} disabled={m.switchingDisabled} />
     <Dialog open={guideOpen} onOpenChange={setGuideOpen}><DialogContent className="ui-guide-dialog"><DialogHeader><DialogTitle>A good document makes a good start.</DialogTitle><DialogDescription>What to expect when moving from Word to LaTeX.</DialogDescription></DialogHeader><div className="ui-guide-content"><div><CheckCircle size={20} /><section><h3>Structure travels well</h3><p>Use Word heading styles, native equations, lists, footnotes, and PNG or JPEG figures. Choose Article or Report to set the LaTeX document class.</p></section></div><div><ListChecks size={20} /><section><h3>Leave a little room for review</h3><p>Review merged tables, multilingual fonts, references, text boxes, and floating figures. Word headers, footers, comments, charts, and embedded objects may need manual work. Tracked changes are accepted.</p></section></div><div><FolderSimple size={20} /><section><h3>Everything you need in one ZIP</h3><p>Your saved source, extracted images, README, and conversion review are bundled together. You can edit the source here or import the ZIP into Overleaf.</p></section></div><div><FileText size={20} /><section><h3>PDF is a separate step</h3><p>Build the preview when you are ready. First use may download TeX packages. A successful build checks syntax; it does not guarantee that every Word element survived.</p></section></div></div></DialogContent></Dialog>
     <Dialog open={historyOpen} onOpenChange={setHistoryOpen}><DialogContent className="ui-history-dialog"><DialogHeader><DialogTitle>Pick up where you left off.</DialogTitle><DialogDescription>Your recent documents, saved on this machine.</DialogDescription></DialogHeader><div className="ui-mobile-history-list">{m.history.length ? m.history.map(job => <Button variant="ghost" key={job.id} disabled={m.switchingDisabled} onClick={() => { setHistoryOpen(false); m.openJob(job) }}><FileText size={17} /><span>{job.filename}</span>{job.status === 'COMPLETED' && <CheckCircle size={15} />}</Button>) : <p>Convert your first document to start your history.</p>}</div></DialogContent></Dialog>
   </div>
