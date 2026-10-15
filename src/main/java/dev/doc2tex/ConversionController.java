@@ -69,6 +69,38 @@ class ConversionController {
         return service.decide(id, findingId, decision.revision(), decision.status(), decision.fingerprint());
     }
 
+    @GetMapping("/jobs/{id}/bibliography")
+    ConversionService.BibliographyReport bibliography(@PathVariable String id) throws IOException { return service.bibliography(id); }
+
+    @PostMapping(value = "/jobs/{id}/bibliography", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    ConversionService.RestoredDocument importBibliography(@PathVariable String id, @RequestPart MultipartFile file,
+            @RequestParam(defaultValue = "-1") int revision) throws IOException { return service.importBibliography(id, revision, file); }
+
+    @GetMapping("/jobs/{id}/bibliography/setup")
+    LatexBibliography.Plan bibliographySetup(@PathVariable String id) throws IOException { return service.bibliographySetup(id); }
+
+    record BibliographySetup(@NotNull @PositiveOrZero Integer revision, @NotBlank @Size(max = 64) String sourceHash) {}
+    @PostMapping("/jobs/{id}/bibliography/setup")
+    ConversionService.RestoredDocument applyBibliographySetup(@PathVariable String id, @Valid @RequestBody BibliographySetup request) throws IOException {
+        return service.applyBibliographySetup(id, request.revision(), request.sourceHash());
+    }
+
+    @GetMapping("/jobs/{id}/bibliography/file")
+    ResponseEntity<StreamingResponseBody> bibliographyFile(@PathVariable String id) throws IOException {
+        service.requireBibliography(id, null);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/x-bibtex"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename("references.bib").build().toString())
+                .body(output -> service.writeBibliography(id, null, output));
+    }
+
+    @GetMapping("/jobs/{id}/versions/{revision}/bibliography")
+    ResponseEntity<StreamingResponseBody> versionBibliography(@PathVariable String id, @PathVariable int revision) throws IOException {
+        service.requireBibliography(id, revision);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/x-bibtex"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename("references-v" + revision + ".bib").build().toString())
+                .body(output -> service.writeBibliography(id, revision, output));
+    }
+
     @PostMapping(value = "/jobs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     ResponseEntity<Job> create(@RequestPart MultipartFile file, @RequestParam(defaultValue = "article") String template,
             @RequestParam(required = false) String layout) throws IOException {

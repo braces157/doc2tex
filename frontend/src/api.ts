@@ -45,7 +45,13 @@ export interface SavedVersion {
   bytes: number
   origin: 'converted' | 'legacy' | 'saved' | 'restored'
   restoredFrom: number
+  bibliographyFilename?: string
+  assetBytes?: number
 }
+
+export interface BibliographyEntry { key: string; type: string; title: string; author: string; year: string; line: number }
+export interface BibliographyReport { revision: number; filename: string; bytes: number; sha256: string; entries: BibliographyEntry[]; unknownKeys: string[]; warnings: string[] }
+export interface BibliographyPlan { revision: number; sourceHash: string; changes: { line: number; title: string; before: string; after: string }[]; warnings: string[] }
 
 export interface SavedHistory {
   items: SavedVersion[]

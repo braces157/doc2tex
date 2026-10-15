@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, downloadText, formatBytes } from './api'
+import { downloadBibliography } from './bibliographyDownload'
 import type { Job, SavedHistory } from './api'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog'
@@ -20,6 +21,7 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
   const source = preview?.request === sourceRequest ? preview : null
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState('')
+  const [downloadingBibliography, setDownloadingBibliography] = useState(false)
 
   useEffect(() => {
     if (!request.open || !request.id) return
@@ -63,10 +65,12 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
             {!source && <p role="status">Loading version source…</p>}
             {source?.error && <div role="alert"><p>{source.error}</p><Button variant="outline" onClick={() => setAttempt(value => value + 1)}>Retry version source</Button></div>}
             {source && !source.error && <label>Version {selected?.revision} · read only<textarea readOnly aria-label="Saved version source" spellCheck={false} value={source.source} /></label>}
+            {selected?.bibliographyFilename && <p className="ui-version-asset-note">This version includes {selected.bibliographyFilename} ({formatBytes(selected.assetBytes ?? 0)} of bibliography/font assets). Restoring also restores those matching assets. Export the restored project to include its fonts.</p>}
           </section>
         </div>
         {restoreError && <p role="alert">{restoreError}</p>}
         <div className="ui-version-actions"><Button variant="outline" disabled={!source || Boolean(source.error)} onClick={() => { if (source && selected) downloadText(source.source, `main-version-${selected.revision}.tex`) }}>Download version</Button>
+          {selected?.bibliographyFilename && <Button variant="outline" disabled={restoring || downloadingBibliography} onClick={() => { if (!job) return; setRestoreError(''); setDownloadingBibliography(true); void downloadBibliography(`/jobs/${job.id}/versions/${selected.revision}/bibliography`, `references-v${selected.revision}.bib`).catch(error => setRestoreError(error instanceof Error ? error.message : 'Could not download version bibliography.')).finally(() => setDownloadingBibliography(false)) }}>Download version bibliography</Button>}
           <Button disabled={disabled || restoring || !source || Boolean(source.error)} onClick={() => void restore()}>{restoring ? 'Restoring…' : `Restore version ${selected?.revision ?? ''}`}</Button></div>
       </>}
     </DialogContent>

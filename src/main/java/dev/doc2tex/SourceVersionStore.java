@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -29,7 +30,8 @@ class SourceVersionStore {
     SourceVersionStore() { this(100, 100L * 1024 * 1024); }
     SourceVersionStore(int maxVersions, long maxBytes) { this.maxVersions = maxVersions; this.maxBytes = maxBytes; }
 
-    record Version(int revision, Instant createdAt, long bytes, String origin, int restoredFrom) {}
+    record Version(int revision, Instant createdAt, long bytes, String origin, int restoredFrom, String bibliographyFilename, long assetBytes) {}
+    private record Snapshot(byte[] source, BibliographyAssets bibliography) {}
     record History(List<Version> items, int currentRevision, int firstRevision, boolean legacyHistoryUnavailable,
                    int maxVersions, long maxBytes, long bytesUsed) {}
     enum Stage { SNAPSHOT_PUBLISHED, CACHE_REPLACED, METADATA_COMMITTED }
@@ -54,9 +56,9 @@ class SourceVersionStore {
         Path initial = snapshot(directory, job.revision());
         if (Files.exists(initial, LinkOption.NOFOLLOW_LINKS)) {
             // An interrupted baseline initialization may have published its snapshot already.
-            if (!MessageDigest.isEqual(bytes, readSnapshot(directory, job.revision())))
+            if (!MessageDigest.isEqual(bytes, readSnapshot(directory, job.revision()).source()))
                 throw new IOException("The initial saved snapshot does not match the source. Back up this project before repairing history.");
-        } else writeSnapshot(directory, job.revision(), bytes, legacy ? "legacy" : "converted", -1);
+        } else writeSnapshot(directory, job.revision(), bytes, legacy ? "legacy" : "converted", -1, null);
         Properties properties = new Properties();
         properties.setProperty("firstRevision", Integer.toString(job.revision()));
         properties.setProperty("legacy", Boolean.toString(legacy));
@@ -69,7 +71,7 @@ class SourceVersionStore {
             if (!Files.isRegularFile(source)) return; // Metadata-only jobs still expose the existing source-load error.
             initialize(job, directory, true);
         }
-        byte[] committed = readVersion(job, directory, job.revision());
+        Snapshot committed = readSnapshot(directory, job.revision());
         try (var paths = Files.list(root(directory))) {
             for (Path path : paths.toList()) {
                 String name = path.getFileName().toString();
@@ -78,7 +80,7 @@ class SourceVersionStore {
                 if (staged || future) removeUncommitted(path);
             }
         }
-        replaceCache(directory, committed);
+        replaceCache(directory, committed.source(), committed.bibliography());
     }
 
     History list(Job job, Path directory) throws IOException {
@@ -98,7 +100,7 @@ class SourceVersionStore {
         if (items.isEmpty() || items.getFirst().revision() != job.revision() || items.getLast().revision() != first)
             throw new IOException("Saved history is missing its committed or initial revision.");
         return new History(items, job.revision(), first, Boolean.parseBoolean(history.getProperty("legacy")),
-                maxVersions, maxBytes, items.stream().mapToLong(Version::bytes).sum());
+                maxVersions, maxBytes, items.stream().mapToLong(version -> version.bytes() + version.assetBytes()).sum());
     }
 
     byte[] current(Job job, Path directory) throws IOException {
@@ -113,30 +115,39 @@ class SourceVersionStore {
         }
         int first = integer(properties(historyFile(directory)), "firstRevision");
         if (revision < first || revision > job.revision()) throw new ApiException(HttpStatus.NOT_FOUND, "This saved version could not be found.");
-        return readSnapshot(directory, revision);
+        return readSnapshot(directory, revision).source();
+    }
+
+    BibliographyAssets bibliography(Job job, Path directory, int revision) throws IOException {
+        readVersion(job, directory, revision); // Validate revision range and source/asset integrity together.
+        return initialized(directory) ? readSnapshot(directory, revision).bibliography() : null;
     }
 
     Job commit(Job current, Path directory, String source, int restoredFrom, Commit persist) throws IOException {
+        return commit(current, directory, source, restoredFrom, persist, bibliography(current, directory, restoredFrom < 0 ? current.revision() : restoredFrom));
+    }
+
+    Job commit(Job current, Path directory, String source, int restoredFrom, Commit persist, BibliographyAssets bibliography) throws IOException {
         recover(current, directory);
         if (!initialized(directory)) throw new IOException("The current source is unavailable; history cannot be initialized.");
         History history = list(current, directory);
         byte[] bytes = source.getBytes(StandardCharsets.UTF_8);
         if (bytes.length > MAX_SOURCE) throw new ApiException(HttpStatus.BAD_REQUEST, "The source exceeds the 2 MB limit.");
-        if (history.items().size() >= maxVersions || history.bytesUsed() + bytes.length > maxBytes)
+        if (history.items().size() >= maxVersions || history.bytesUsed() + bytes.length + (bibliography == null ? 0 : bibliography.totalBytes()) > maxBytes)
             throw new ApiException(HttpStatus.INSUFFICIENT_STORAGE,
                     "Saved history is full (" + maxVersions + " versions or " + maxBytes + " bytes). Download this source and export the project before starting a new document. Existing versions have been preserved.");
         if (current.revision() == Integer.MAX_VALUE) throw new ApiException(HttpStatus.CONFLICT, "This project's revision limit has been reached.");
         Job next = current.edited();
-        writeSnapshot(directory, next.revision(), bytes, restoredFrom < 0 ? "saved" : "restored", restoredFrom);
+        writeSnapshot(directory, next.revision(), bytes, restoredFrom < 0 ? "saved" : "restored", restoredFrom, bibliography);
         checkpoint(Stage.SNAPSHOT_PUBLISHED);
-        replaceCache(directory, bytes);
+        replaceCache(directory, bytes, bibliography);
         checkpoint(Stage.CACHE_REPLACED);
         persist.save(next); // Atomic commit pointer update; prior snapshots remain immutable.
         checkpoint(Stage.METADATA_COMMITTED);
         return next;
     }
 
-    private void writeSnapshot(Path directory, int revision, byte[] source, String origin, int restoredFrom) throws IOException {
+    private void writeSnapshot(Path directory, int revision, byte[] source, String origin, int restoredFrom, BibliographyAssets bibliography) throws IOException {
         Path stage = root(directory).resolve(".pending-" + UUID.randomUUID());
         JobStore.checkUnlinked(stage); Files.createDirectories(stage);
         writeForced(stage.resolve("main.tex"), source);
@@ -146,6 +157,11 @@ class SourceVersionStore {
         metadata.setProperty("bytes", Integer.toString(source.length));
         metadata.setProperty("sha256", digest(source));
         metadata.setProperty("origin", origin); metadata.setProperty("restoredFrom", Integer.toString(restoredFrom));
+        if (bibliography != null) {
+            Path assets = stage.resolve(BibliographyAssets.FOLDER); Files.createDirectories(assets);
+            for (var entry : bibliography.files().entrySet()) writeForced(assets.resolve(entry.getKey()), entry.getValue());
+            bibliography.metadata(metadata); forceDirectory(assets);
+        }
         writeForced(stage.resolve("version.properties"), propertyBytes(metadata));
         forceDirectory(stage);
         Files.move(stage, snapshot(directory, revision), StandardCopyOption.ATOMIC_MOVE);
@@ -158,16 +174,17 @@ class SourceVersionStore {
             if (integer(p, "revision") != revision) throw new IOException("Saved version identity does not match its directory.");
             long bytes = Long.parseLong(p.getProperty("bytes"));
             if (bytes < 0 || bytes > MAX_SOURCE) throw new IOException("Saved version size is invalid.");
-            return new Version(revision, Instant.parse(p.getProperty("createdAt")), bytes, p.getProperty("origin"), integer(p, "restoredFrom"));
+            long assetBytes = BibliographyAssets.declaredBytes(p);
+            return new Version(revision, Instant.parse(p.getProperty("createdAt")), bytes, p.getProperty("origin"), integer(p, "restoredFrom"), assetBytes == 0 ? "" : p.getProperty("bib.filename"), assetBytes);
         } catch (RuntimeException exception) { throw new IOException("Saved version metadata is unreadable.", exception); }
     }
 
-    private byte[] readSnapshot(Path directory, int revision) throws IOException {
+    private Snapshot readSnapshot(Path directory, int revision) throws IOException {
         Version version = metadata(directory, revision);
         byte[] bytes = readBounded(snapshot(directory, revision).resolve("main.tex"));
         String expected = properties(snapshot(directory, revision).resolve("version.properties")).getProperty("sha256");
         if (version.bytes() != bytes.length || !digest(bytes).equals(expected)) throw new IOException("Saved version integrity check failed. Back up this project before repairing history.");
-        return bytes;
+        return new Snapshot(bytes, BibliographyAssets.read(snapshot(directory, revision), properties(snapshot(directory, revision).resolve("version.properties"))));
     }
 
     private byte[] readBounded(Path path) throws IOException {
@@ -179,13 +196,37 @@ class SourceVersionStore {
         }
     }
 
-    private void replaceCache(Path directory, byte[] source) throws IOException {
+    private void replaceCache(Path directory, byte[] source, BibliographyAssets bibliography) throws IOException {
+        replaceBibliographyCache(directory, bibliography);
         Path cache = directory.resolve("output/main.tex"), temporary = cache.resolveSibling("main.tex.version-tmp");
         JobStore.checkUnlinked(cache); JobStore.checkUnlinked(temporary);
         if (Files.isRegularFile(cache) && Files.size(cache) <= MAX_SOURCE && MessageDigest.isEqual(source, readBounded(cache))) return;
         Files.createDirectories(cache.getParent()); writeForced(temporary, source);
         Files.move(temporary, cache, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         forceDirectory(cache.getParent());
+    }
+
+    private void replaceBibliographyCache(Path directory, BibliographyAssets bibliography) throws IOException {
+        Path folder = directory.resolve("output").resolve(BibliographyAssets.FOLDER), marker = directory.resolve(".bibliography-cache.properties");
+        JobStore.checkUnlinked(folder); JobStore.checkUnlinked(marker);
+        boolean owned = Files.isRegularFile(marker);
+        if (owned && !properties(marker).getProperty("kind", "").equals("doc2tex-bibliography-v1")) throw new IOException("Bibliography cache ownership is unreadable. Back up project storage before repairing it.");
+        if (!owned && bibliography == null) return; // Never remove unmanaged files from legacy projects.
+        if (!owned) {
+            if (Files.exists(folder)) try (var paths = Files.list(folder)) { if (paths.findAny().isPresent()) throw new IOException("The bibliography folder contains unmanaged files. Back it up and rename it before importing a bibliography."); }
+            Properties owner = new Properties(); owner.setProperty("kind", "doc2tex-bibliography-v1"); atomicProperties(marker, owner);
+        }
+        Files.createDirectories(folder);
+        Map<String, byte[]> files = bibliography == null ? Map.of() : bibliography.files();
+        for (String name : List.of(BibliographyAssets.BIB, BibliographyAssets.FONT, BibliographyAssets.LICENSE)) {
+            Path target = folder.resolve(name); JobStore.checkUnlinked(target);
+            Path temporary = folder.resolve(name + ".version-tmp"); JobStore.checkUnlinked(temporary);
+            byte[] bytes = files.get(name);
+            if (bytes == null) { Files.deleteIfExists(target); Files.deleteIfExists(temporary); continue; }
+            writeForced(temporary, bytes);
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        }
+        forceDirectory(folder);
     }
 
     private void removeUncommitted(Path path) throws IOException {
@@ -231,7 +272,7 @@ class SourceVersionStore {
             ByteBuffer buffer = ByteBuffer.wrap(bytes); while (buffer.hasRemaining()) channel.write(buffer); channel.force(true);
         }
     }
-    private String digest(byte[] bytes) {
+    static String digest(byte[] bytes) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
         catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
     }

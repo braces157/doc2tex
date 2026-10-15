@@ -71,3 +71,17 @@
 .ui-layout-fields .ui-layout-wide { grid-column: 1 / -1; }
 .ui-layout-fields input, .ui-layout-fields select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; }
 .ui-layout-fields :is(input,select):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ui-bibliography { margin-top: 18px; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; font-size: 13px; }
+.ui-bibliography > summary { cursor: pointer; font-weight: 600; }
+.ui-bibliography-panel { display: grid; gap: 14px; padding-top: 14px; min-width: 0; }
+.ui-bibliography-panel > p { color: var(--muted-foreground); line-height: 1.6; overflow-wrap: anywhere; }
+.ui-bibliography-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ui-bibliography-search { display: grid; gap: 6px; font-weight: 500; }
+.ui-bibliography-search input { padding: 9px 12px; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--background); font: inherit; }
+.ui-bibliography-entries { padding: 0; margin: 0; list-style: none; display: grid; gap: 8px; max-height: 380px; overflow: auto; }
+.ui-bibliography-entries li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); padding: 12px 0; }
+.ui-bibliography-entries li > div { display: grid; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.ui-bibliography-entries li > button { flex-shrink: 0; }
+.ui-bibliography-entries code { font-size: 12px; }
+.ui-bibliography-entries span { color: var(--muted-foreground); font-size: 12px; }
+@media (max-width: 599px) { .ui-bibliography-entries li { align-items: start; flex-direction: column; } }

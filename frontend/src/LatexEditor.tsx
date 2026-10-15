@@ -11,6 +11,7 @@ export interface LatexEditorHandle {
   goToLine: (line: number) => number
   focus: () => void
   isComposing: () => boolean
+  insertText: (text: string) => boolean
 }
 
 interface Props {
@@ -95,7 +96,12 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
     editor.focus()
     return number
   }
-  useImperativeHandle(editorRef, () => ({ goToLine, focus: () => view.current?.focus(), isComposing: () => view.current?.composing ?? false }))
+  useImperativeHandle(editorRef, () => ({ goToLine, focus: () => view.current?.focus(), isComposing: () => view.current?.composing ?? false,
+    insertText: text => {
+      const editor = view.current
+      if (!editor || editor.state.facet(EditorState.readOnly) || editor.composing) return false
+      editor.dispatch({ ...editor.state.replaceSelection(text), scrollIntoView: true, userEvent: 'input' }); editor.focus(); return true
+    } }))
 
   const command = (operation: (view: EditorView) => boolean) => {
     if (disabled || !view.current) return
