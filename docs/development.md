@@ -21,7 +21,7 @@ A local DOCX → LaTeX app built with **Spring Boot 4.1.1, Java 21+, React, Type
 
 ## Run on Windows
 
-Prerequisites: JDK 21 or newer and Node.js 24 LTS (recommended). The Maven Wrapper downloads Maven 3.9.12; a system Maven installation is optional. Run commands from this project directory. Replace `./mvnw.cmd` with `./mvnw` on Linux/macOS.
+Prerequisites: JDK 21 or newer and Node.js 24 LTS (recommended). The Maven Wrapper downloads Maven 3.10.0; a system Maven installation is optional. Run commands from this project directory. Replace `./mvnw.cmd` with `./mvnw` on Linux/macOS.
 
 ```powershell
 # Download project-local, checksum-verified converters and multilingual fonts.
