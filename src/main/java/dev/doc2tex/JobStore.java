@@ -33,6 +33,7 @@ class JobStore {
     private final Path root;
     private final SourceVersionStore versions;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
+    private final Map<String, String> historyFailures = new ConcurrentHashMap<>();
     // Retain lock identities for this process lifetime, including after deletion.
     private final Map<String, ReentrantReadWriteLock> locks = new ConcurrentHashMap<>();
 
@@ -61,9 +62,18 @@ class JobStore {
                         job = job.withPreview("FAILED", "The app restarted during compilation. Build the preview again.");
                     Path marker = root.resolve(".deletions").resolve(id + ".properties");
                     checkUnlinked(marker);
-                    if (job.status().equals("COMPLETED") && !Files.exists(marker, LinkOption.NOFOLLOW_LINKS))
-                        versions.recover(job, directory);
-                    save(job);
+                    if (job.status().equals("COMPLETED") && !Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+                        try { versions.recover(job, directory); }
+                        catch (IOException | RuntimeException exception) {
+                            historyFailures.put(id, "Saved history recovery failed. Download the original Word document and back up project storage before repairing history. After repair, restart the app to revalidate history. You can still delete this document from All documents.");
+                            log.warn("History recovery failed for {}: {}", id, exception.getMessage());
+                        }
+                    }
+                    try { save(job); }
+                    catch (IOException | RuntimeException exception) {
+                        jobs.put(id, job); // Readable metadata still permits retrieval, original download, and cleanup.
+                        log.warn("Could not refresh metadata for {}: {}", id, exception.getMessage());
+                    }
                 } catch (Exception exception) {
                     log.warn("Skipping unavailable job {}: {}", directory.getFileName(), exception.getMessage());
                 }
@@ -106,6 +116,11 @@ class JobStore {
         if (job.deletionPending()) throw new ApiException(HttpStatus.GONE,
                 "This document is being removed. Cleanup is incomplete; retry Delete in All documents. Download any unsaved text before leaving this tab.");
         return job;
+    }
+
+    void requireHistory(String id) {
+        String failure = historyFailures.get(id);
+        if (failure != null) throw new ApiException(HttpStatus.CONFLICT, failure);
     }
 
     static final class Operation implements AutoCloseable {
@@ -176,6 +191,7 @@ class JobStore {
                 checkUnlinked(marker);
                 removePath(marker);
                 jobs.remove(id);
+                historyFailures.remove(id);
             } catch (IOException exception) {
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                         "Deletion could not finish. The document is unavailable until cleanup completes. Retry Delete in All documents.");
@@ -288,5 +304,7 @@ class JobStore {
         try (OutputStream output = Files.newOutputStream(temporary)) { p.store(output, "doc2TeX job"); }
         try (var channel = java.nio.channels.FileChannel.open(temporary, java.nio.file.StandardOpenOption.WRITE)) { channel.force(true); }
         Files.move(temporary, metadata, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        SourceVersionStore.forceDirectory(metadata.getParent());
+        SourceVersionStore.forceDirectory(root);
     }
 }

@@ -98,10 +98,20 @@ class ConversionController {
     ResponseEntity<StreamingResponseBody> download(@PathVariable String id) {
         Job job = store.get(id);
         if (!job.status().equals("COMPLETED")) throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "The conversion is not ready yet.");
+        store.requireHistory(id);
         String filename = job.filename().replaceFirst("(?i)\\.docx$", "") + "-latex.zip";
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename, StandardCharsets.UTF_8).build().toString())
                 .body(output -> service.writeArchive(id, output));
+    }
+
+    @GetMapping("/jobs/{id}/original")
+    ResponseEntity<StreamingResponseBody> original(@PathVariable String id) {
+        Job job = store.get(id);
+        service.original(id);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(job.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(output -> service.writeOriginal(id, output));
     }
 
     @GetMapping("/sample.docx")

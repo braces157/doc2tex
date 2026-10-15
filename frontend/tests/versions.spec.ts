@@ -12,7 +12,7 @@ const editor = (page: Page) => page.getByRole('textbox', { name: 'LaTeX source e
 const history = (page: Page) => page.getByRole('dialog', { name: 'Saved versions', exact: true })
 const preview = (page: Page) => history(page).getByRole('textbox', { name: 'Saved version source', exact: true })
 
-async function setup(page: Page, legacy = false) {
+async function setup(page: Page, legacy = false, historyCorrupt = false) {
   const first = legacy ? 5 : 0
   const job: Job = { id: ID, filename: 'versions.docx', template: 'article', status: 'COMPLETED',
     previewStatus: 'NOT_REQUESTED', message: 'Ready', previewMessage: '', createdAt: '2026-10-15T12:00:00Z',
@@ -20,7 +20,7 @@ async function setup(page: Page, legacy = false) {
   const versions = new Map<number, { source: string; origin: SavedVersion['origin']; restoredFrom: number }>([
     [first, { source: ORIGINAL, origin: legacy ? 'legacy' : 'converted', restoredFrom: -1 }],
   ])
-  const state = { job, versions, historyFails: false, previewFails: false, limitFull: false, restores: 0, compiledSource: '', exportedSource: '' }
+  const state = { job, versions, historyFails: false, previewFails: false, limitFull: false, restores: 0, compiledSource: '', exportedSource: '', historyCorrupt, originalFails: false }
   await page.context().route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body })
@@ -36,6 +36,7 @@ async function setup(page: Page, legacy = false) {
     if (path === `/api/jobs/${ID}`) return json(state.job)
     if (path.endsWith('/review')) return json({ elements: {}, findings: [], compilerWarnings: [], scope: 'Review manually.' })
     if (path === `/api/jobs/${ID}/source`) {
+      if (state.historyCorrupt) return json({ message: 'Saved history recovery failed. Download the original Word document and back up project storage before repairing history.' }, 409)
       if (request.method() === 'PUT') {
         const body = request.postDataJSON() as { source: string; revision: number }
         if (body.revision !== state.job.revision) return json({ message: 'The source changed in another window.' }, 409)
@@ -74,12 +75,17 @@ async function setup(page: Page, legacy = false) {
       state.exportedSource = savedSource()
       return route.fulfill({ contentType: 'application/zip', headers: { 'Content-Disposition': 'attachment; filename=project.zip' }, body: 'mock archive response' })
     }
+    if (path.endsWith('/original')) {
+      if (state.originalFails) return json({ message: 'Original download temporarily unavailable.' }, 503)
+      return route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        headers: { 'Content-Disposition': 'attachment; filename=versions.docx' }, body: 'mock original document bytes' })
+    }
     return json({ message: 'Unexpected request' }, 404)
   })
   await page.goto('/')
   await page.getByRole('button', { name: 'All documents', exact: true }).click()
   await page.getByRole('dialog', { name: 'All documents' }).getByRole('button', { name: 'Open versions.docx', exact: true }).click()
-  await expect(editor(page)).toHaveValue(ORIGINAL)
+  if (!historyCorrupt) await expect(editor(page)).toHaveValue(ORIGINAL)
   return state
 }
 
@@ -175,4 +181,29 @@ test('legacy history, request retries and storage limits show explicit usable st
   await history(page).getByRole('button', { name: 'Restore version 5', exact: true }).click()
   await expect(history(page).getByRole('alert')).toContainText('Saved history is full. Existing versions have been preserved.')
   expect(state.job.revision).toBe(5); expect(state.versions.size).toBe(1)
+})
+
+test('a history recovery failure keeps the original and local draft downloadable', async ({ page }, testInfo) => {
+  await page.addInitScript(({ id, source }) => localStorage.setItem(`doc2tex:draft:${id}:0`, JSON.stringify({
+    jobId: id, revision: 0, source, token: crypto.randomUUID(), updatedAt: Date.now(),
+  })), { id: ID, source: DIRTY })
+  const state = await setup(page, false, true)
+  await expect(page.getByRole('alert')).toContainText('Saved history recovery failed')
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Download ZIP', exact: true })).toBeDisabled()
+  state.originalFails = true
+  await page.getByRole('button', { name: 'Download original Word document', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Original download temporarily unavailable')
+  state.originalFails = false
+  const originalDownload = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download original Word document', exact: true }).click()
+  expect(await readFile((await (await originalDownload).path())!, 'utf8')).toBe('mock original document bytes')
+  const recovery = page.getByRole('region', { name: 'Draft recovery' })
+  await expect(recovery).toContainText('Saved source is unavailable')
+  const draftDownload = page.waitForEvent('download')
+  await recovery.getByRole('button', { name: 'Download draft', exact: true }).click()
+  expect(await readFile((await (await draftDownload).path())!, 'utf8')).toBe(DIRTY)
+  await page.getByRole('alert').screenshot({ path: testInfo.outputPath('history-recovery-error.png') })
+  await page.getByRole('button', { name: 'All documents', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'All documents' }).getByRole('button', { name: 'Delete versions.docx', exact: true })).toBeEnabled()
 })

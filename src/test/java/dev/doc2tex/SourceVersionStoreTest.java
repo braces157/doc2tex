@@ -196,4 +196,33 @@ class SourceVersionStoreTest {
             assertEquals("Keep", Files.readString(outside.resolve("keep.txt")));
         } finally { Files.delete(link); }
     }
+
+    @Test void corruptHistoryStaysListedAndAllowsOriginalDownloadAndDeletionAfterRestart() throws Exception {
+        JobStore first = store(new SourceVersionStore()); Job job = create(first, 0, "Trusted source");
+        Path directory = first.directory(job.id()); first.versions().initialize(job, directory, false);
+        byte[] original = Files.readAllBytes(directory.resolve("input.docx"));
+        Files.writeString(directory.resolve(".versions/0/main.tex"), "Damaged snapshot");
+        JobStore restarted = store(new SourceVersionStore());
+        assertEquals(job, restarted.get(job.id()));
+        assertTrue(restarted.list().stream().anyMatch(item -> item.id().equals(job.id())));
+        assertEquals(1, restarted.library("history", "", "newest", 0, 20).total());
+        ConversionService service = service(restarted);
+        try {
+            assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class, () -> service.source(job.id())).status);
+            assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class, () -> service.versions(job.id())).status);
+            assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class, () -> service.saveSource(job.id(), "Unsafe overwrite", 0)).status);
+            assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class, () -> service.restore(job.id(), 0, 0)).status);
+            ConversionController controller = new ConversionController(service, restarted, new Tools(properties()));
+            assertEquals(HttpStatus.CONFLICT, assertThrows(ApiException.class, () -> controller.download(job.id())).status);
+            var response = controller.original(job.id());
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            assertNotNull(response.getBody()); response.getBody().writeTo(bytes);
+            assertArrayEquals(original, bytes.toByteArray());
+            assertEquals("Damaged snapshot", Files.readString(directory.resolve(".versions/0/main.tex")));
+            assertEquals("Trusted source", Files.readString(directory.resolve("output/main.tex")));
+            assertEquals(HttpStatus.NO_CONTENT, controller.delete(job.id()).getStatusCode());
+            assertFalse(Files.exists(directory));
+        } finally { service.stop(); }
+    }
 }

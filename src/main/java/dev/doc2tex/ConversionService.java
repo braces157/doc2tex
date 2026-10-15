@@ -247,6 +247,19 @@ class ConversionService {
         try (var operation = store.read(id)) { Files.copy(pdfLocked(id), stream); }
     }
 
+    Path original(String id) {
+        try (var operation = store.read(id)) {
+            Path input = store.directory(id).resolve("input.docx");
+            JobStore.checkUnlinked(input);
+            if (!Files.isRegularFile(input)) throw new ApiException(HttpStatus.NOT_FOUND, "The original Word document is missing.");
+            return input;
+        }
+    }
+
+    void writeOriginal(String id, OutputStream stream) throws IOException {
+        try (var operation = store.read(id)) { Files.copy(original(id), stream); }
+    }
+
     String compilerLog(String id) throws IOException {
         try (var operation = store.read(id)) { return compilerLogLocked(id); }
     }
@@ -296,6 +309,7 @@ class ConversionService {
     private Job ready(String id) {
         Job job = store.get(id);
         if (!job.status().equals("COMPLETED")) throw new ApiException(HttpStatus.CONFLICT, "The conversion is not ready yet.");
+        store.requireHistory(id);
         return job;
     }
 

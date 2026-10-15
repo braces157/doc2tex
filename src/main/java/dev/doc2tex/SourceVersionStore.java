@@ -147,7 +147,9 @@ class SourceVersionStore {
         metadata.setProperty("sha256", digest(source));
         metadata.setProperty("origin", origin); metadata.setProperty("restoredFrom", Integer.toString(restoredFrom));
         writeForced(stage.resolve("version.properties"), propertyBytes(metadata));
+        forceDirectory(stage);
         Files.move(stage, snapshot(directory, revision), StandardCopyOption.ATOMIC_MOVE);
+        forceDirectory(root(directory));
     }
 
     private Version metadata(Path directory, int revision) throws IOException {
@@ -183,6 +185,7 @@ class SourceVersionStore {
         if (Files.isRegularFile(cache) && Files.size(cache) <= MAX_SOURCE && MessageDigest.isEqual(source, readBounded(cache))) return;
         Files.createDirectories(cache.getParent()); writeForced(temporary, source);
         Files.move(temporary, cache, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        forceDirectory(cache.getParent());
     }
 
     private void removeUncommitted(Path path) throws IOException {
@@ -210,6 +213,14 @@ class SourceVersionStore {
         Path temporary = path.resolveSibling(path.getFileName() + ".tmp");
         writeForced(temporary, propertyBytes(properties));
         JobStore.checkUnlinked(path); Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        forceDirectory(path.getParent());
+    }
+
+    static void forceDirectory(Path directory) {
+        // POSIX needs directory-entry persistence as well as forced file contents.
+        // Windows providers generally deny opening a directory as a FileChannel.
+        try (var channel = FileChannel.open(directory, StandardOpenOption.READ)) { channel.force(true); }
+        catch (IOException | UnsupportedOperationException ignored) { /* Best effort where directory fsync is unsupported. */ }
     }
     private byte[] propertyBytes(Properties properties) throws IOException {
         var output = new ByteArrayOutputStream(); properties.store(output, "doc2TeX saved source version"); return output.toByteArray();

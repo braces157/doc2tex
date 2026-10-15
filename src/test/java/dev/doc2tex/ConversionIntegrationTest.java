@@ -96,7 +96,7 @@ class ConversionIntegrationTest {
     }
 
     @Test void activeArchiveAndPdfStreamsExcludeDeletionUntilTheirLastByte() throws Exception {
-        for (boolean pdf : List.of(false, true)) {
+        for (String format : List.of("archive", "pdf", "original")) {
             Job job = new Job(java.util.UUID.randomUUID().toString(), "stream-test.docx", "article", "COMPLETED",
                     "READY", "", "", java.time.Instant.now(), java.time.Instant.now(), 100, 0);
             store.save(job);
@@ -118,7 +118,9 @@ class ConversionIntegrationTest {
                 }
             };
             var task = new java.util.concurrent.FutureTask<Void>(() -> {
-                if (pdf) service.writePdf(job.id(), blocked); else service.writeArchive(job.id(), blocked);
+                if (format.equals("pdf")) service.writePdf(job.id(), blocked);
+                else if (format.equals("original")) service.writeOriginal(job.id(), blocked);
+                else service.writeArchive(job.id(), blocked);
                 return null;
             });
             Thread thread = Thread.ofPlatform().start(task);
@@ -139,6 +141,8 @@ class ConversionIntegrationTest {
         Job job = await(upload("research.docx", SampleDocument.create(), "article"));
         assertEquals("COMPLETED", job.status(), job.message());
         String base = "/api/jobs/" + job.id();
+        assertArrayEquals(Files.readAllBytes(store.directory(job.id()).resolve("input.docx")),
+                client().get().uri(base + "/original").retrieve().body(byte[].class));
         String source = client().get().uri(base + "/source").retrieve().body(String.class);
         assertNotNull(source);
         assertTrue(source.contains("\\section{Field notes on quiet systems}"), source);
