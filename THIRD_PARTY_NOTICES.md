@@ -7,6 +7,7 @@ The [MIT license](LICENSE) covers doc2TeX's original code. Dependencies and down
 | Spring Boot and Spring Framework | Apache-2.0 | Maven dependencies in the executable JAR; upstream notices retained |
 | React, Radix, Phosphor, Tailwind, and related frontend packages | Mostly MIT; see exact inventory | Compiled browser assets |
 | PDF.js | Apache-2.0 | Browser PDF viewer and worker |
+| CodeMirror and Lezer | MIT | LaTeX editor, commands, search, highlighting and parser runtime; exact versions/licenses in the frontend inventory |
 | Playwright | Apache-2.0 | Development-only browser test runner; not included in application assets |
 | Apache PDFBox | Apache-2.0 | Test-only PDF text inspection; not included in the application JAR |
 | Geist font | SIL OFL-1.1 | Bundled browser font |

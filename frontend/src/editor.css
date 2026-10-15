@@ -21,3 +21,19 @@
 .draft-recovery-actions { display:flex; flex-wrap:wrap; gap:6px; }
 .draft-recovery-actions button { font-size:12px; }
 .draft-storage-error { padding:12px 16px; font-size:12px; line-height:1.7; color:#795837; background:#f7f2e9; border-bottom:1px solid #e6dbca; }
+.latex-editor-shell { height:535px; display:flex; flex-direction:column; min-width:0; background:#fff; }
+.ui-output-panel { min-width:0; }
+.latex-editor-tools { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:8px; border-bottom:1px solid #e1e8d8; background:#fafcf6; }
+.latex-editor-tools button { padding:5px 7px; font-size:11px; border:1px solid #d5dfc9; border-radius:4px; color:#486039; background:white; }
+.latex-editor-tools button[aria-pressed=true] { background:#e0eccf; }
+.latex-editor-tools form { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.latex-editor-tools label { display:flex; align-items:center; gap:4px; font-size:11px; color:#5c7049; }
+.latex-editor-tools input { width:54px; padding:4px; border:1px solid #c8d3bc; border-radius:3px; background:white; }
+.latex-editor-help { display:flex; flex-wrap:wrap; justify-content:space-between; gap:5px; padding:6px 10px; font-size:10px; color:#657856; border-bottom:1px solid #edf1e6; }
+.latex-editor-host { flex:1; min-height:0; min-width:0; overflow:hidden; }
+.latex-editor-host .cm-search { padding:9px; font-size:12px; color:#435c34; background:#f2f7e9; }
+.latex-editor-host .cm-search input[type=text] { max-width:145px; background:white; border:1px solid #b7c7a5; border-radius:3px; padding:4px; margin:3px; }
+.latex-editor-host .cm-button { font-size:11px; color:#3f5832; background:#fff; border:1px solid #b7c7a5; border-radius:3px; }
+.latex-editor-host .cm-content[aria-disabled=true] { opacity:.65; }
+.shortcut-hint { font:9px var(--font-mono); opacity:.7; margin-left:5px; white-space:nowrap; }
+@media (max-width:640px) { .latex-editor-shell { height:445px; }.latex-editor-tools form { margin-left:0; }.latex-editor-tools button { font-size:10px; }.latex-editor-help { font-size:9px; }.latex-editor-host .cm-search input[type=text] { max-width:120px; }.shortcut-hint { font-size:8px; } }
