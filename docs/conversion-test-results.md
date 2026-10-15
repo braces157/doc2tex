@@ -17,9 +17,11 @@ The multilingual baseline produced **208 missing-character warnings while still 
 
 ## Verification performed
 
-- **23 backend tests passed**, with PDF tests enabled and no skipped tests.
+- **31 backend tests passed**, with PDF tests enabled and no skipped tests.
 - Four difficult source fixtures were converted using both Article and Report templates.
-- Four real PDFs were compiled, checked for missing-glyph warnings, and inspected as rendered page images. The long document's contact sheet covers all ten pages.
+- The original four Article PDFs were inspected as rendered page images. The long document's contact sheet covers all ten pages; the table above records that Article baseline.
+- Automated regression checks now compile eight PDFs (all fixtures in both Article and Report), extract required body/footnote/table checkpoints, reject deleted revision text, and check the long register's final page. Full compiler logs are scanned for missing glyphs. PDFs, extracted text, and compiler logs are retained under `target/fidelity-evidence/` and uploaded by CI. These text checks do not replace visual inspection or prove multilingual shaping and reading order.
+- Eight fixture/template exports were checked for matching saved source, valid review JSON, referenced media/fonts and licenses, and unchanged media/font bytes.
 - Required source checkpoints, accepted/deleted revision behavior, native math commands, footnote commands, and image inclusion were asserted.
 - HTTP ZIP exports were checked for source, conversion review JSON, and applicable font/license assets.
 - Input checks cover extension/content mismatch, malformed archives, traversal, macros, XML external entities, and compressed expansion limits.
