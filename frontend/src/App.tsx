@@ -29,6 +29,7 @@ export default function App() {
   const currentId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
   const editorRef = useRef<LatexEditorHandle>(null)
+  const [diagnosticTarget, setDiagnosticTarget] = useState<{ id: string; line: number; revision: number } | null>(null)
   const composition = useRef({ active: false, endedAt: 0 })
   const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -280,6 +281,23 @@ export default function App() {
   }
 
   const readyForActions = completed && !missingDocument && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source.trim())
+  const revealDiagnostic = useEffectEvent((id: string, line: number, revision: number) => {
+    if (currentId.current !== id || job?.revision !== revision || dirty || !readyForActions || saving || compiling) return
+    editorRef.current?.goToLine(line)
+  })
+  const navigateSource = (line: number, revision: number) => {
+    if (!job || dirty || job.revision !== revision || !readyForActions || saving || compiling) return
+    setDiagnosticTarget({ id: job.id, line, revision })
+    setView('source')
+  }
+  useEffect(() => {
+    if (!diagnosticTarget || view !== 'source') return
+    const frame = requestAnimationFrame(() => {
+      revealDiagnostic(diagnosticTarget.id, diagnosticTarget.line, diagnosticTarget.revision)
+      setDiagnosticTarget(current => current === diagnosticTarget ? null : current)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [diagnosticTarget, view])
 
   useEffect(() => {
     const start = () => { composition.current.active = true }
@@ -316,6 +334,7 @@ export default function App() {
       versionsAvailable: completed && sourceDocument.ready && !sourceDocument.recovery && !missingDocument && !busy,
       restoreVersion,
       editorRef, commandKey,
+      navigateSource,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
       selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),

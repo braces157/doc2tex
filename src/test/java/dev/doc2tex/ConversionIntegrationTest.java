@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.List;
 import java.util.zip.ZipInputStream;
@@ -52,6 +53,28 @@ class ConversionIntegrationTest {
             Thread.sleep(100);
         }
         fail("Conversion timed out"); return job;
+    }
+
+    @Test void diagnosticsRouteKeepsRevisionAndTruncationAndHandlesInterruptedMetadata() throws Exception {
+        String id = java.util.UUID.randomUUID().toString(), base = "/api/jobs/" + id;
+        Job job = new Job(id, "diagnostics.docx", "article", "COMPLETED", "FAILED", "", "Build interrupted",
+                java.time.Instant.now(), java.time.Instant.now(), 20, 3);
+        store.save(job);
+        Path directory = store.directory(id);
+        String text = "warning: main.tex:2: Overfull \\hbox\n";
+        CompilerDiagnostics.save(directory, CompilerDiagnostics.parse(text, 2, "READY", true, null));
+        var report = client().get().uri(base + "/diagnostics").retrieve().body(CompilerDiagnostics.Report.class);
+        assertEquals(2, report.revision()); assertTrue(report.logTruncated());
+        assertTrue(client().get().uri(base + "/preview/log").retrieve().body(String.class).contains("Log truncated after 64 KiB"));
+        CompilerDiagnostics.save(directory, CompilerDiagnostics.parse(text, 3, "READY", false, null));
+        report = client().get().uri(base + "/diagnostics").retrieve().body(CompilerDiagnostics.Report.class);
+        assertEquals("FAILED", report.status(), "Interrupted status commit must not claim a completed build");
+        assertTrue(report.items().stream().anyMatch(item -> item.code().equals("build-failed")));
+        Files.writeString(directory.resolve("preview.log"), "error: main.tex:2: unfamiliar tool failure\ncontinued details\n");
+        Files.writeString(directory.resolve("compiler-diagnostics.json"), "{\"revision\":3}");
+        report = client().get().uri(base + "/diagnostics").retrieve().body(CompilerDiagnostics.Report.class);
+        assertNull(report.revision()); assertTrue(report.items().getFirst().raw().contains("continued details"));
+        assertTrue(client().get().uri(base + "/preview/log").retrieve().body(String.class).contains("unfamiliar tool failure"));
     }
 
     @Test void libraryRouteReturnsPagesAndRejectsInvalidParameters() throws Exception {

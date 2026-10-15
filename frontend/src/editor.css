@@ -23,6 +23,15 @@
 .draft-storage-error { padding:12px 16px; font-size:12px; line-height:1.7; color:#795837; background:#f7f2e9; border-bottom:1px solid #e6dbca; }
 .latex-editor-shell { height:535px; display:flex; flex-direction:column; min-width:0; background:#fff; }
 .ui-output-panel { min-width:0; }
+.compiler-diagnostics { max-height:360px; overflow:auto; margin:16px 0; padding:16px; border:1px solid #d8e0cf; border-radius:7px; background:#fafcf6; font-size:12px; color:#485c3b; }
+.compiler-diagnostics h3 { font-size:14px; font-weight:600; margin:0 0 8px; }
+.compiler-diagnostics p { margin:7px 0; line-height:1.7; }
+.compiler-diagnostics ol { list-style:none; margin:10px 0; padding:0; }
+.compiler-diagnostics li { padding:12px 0; border-top:1px solid #dde5d3; }
+.compiler-diagnostics button { padding:6px 9px; margin-top:8px; border:1px solid #aebf9b; border-radius:4px; background:white; }
+.compiler-diagnostics a, .compiler-diagnostics summary { text-decoration:underline; cursor:pointer; }
+.compiler-diagnostics pre, .diagnostic-location { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.7 var(--font-mono); }
+.diagnostic-severity { font-weight:600; }.diagnostic-severity.error { color:#8b463b; }.diagnostics-stale { color:#785c30; }
 .latex-editor-tools { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:8px; border-bottom:1px solid #e1e8d8; background:#fafcf6; }
 .latex-editor-tools button { padding:5px 7px; font-size:11px; border:1px solid #d5dfc9; border-radius:4px; color:#486039; background:white; }
 .latex-editor-tools button[aria-pressed=true] { background:#e0eccf; }

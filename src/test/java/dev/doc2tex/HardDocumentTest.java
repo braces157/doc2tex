@@ -270,4 +270,38 @@ class HardDocumentTest {
         assertTrue(review.compilerWarnings().stream().anyMatch(message -> message.contains("exceeds")));
         Files.deleteIfExists(log);
     }
+
+    @Test void actualCompilerDiagnosticsBindFailuresAndWarningsToSavedRevision() throws Exception {
+        assumeTrue(Boolean.getBoolean("doc2tex.test-pdf"), "Enable with -Ddoc2tex.test-pdf=true");
+        assertTrue(tools.available(tools.tectonic()));
+        Job job = convert("research-complex.docx", "article");
+        String[] bodies = { "\\RoadmapUnknownCommand", "\\includegraphics{roadmap-missing-image.png}",
+                "\\noindent\\hbox to 10pt{A deliberately overfull box with text}\\par" };
+        String[] codes = { "undefined-command", "missing-file", "overfull-box" };
+        for (int index = 0; index < bodies.length; index++) {
+            String source = "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n" + bodies[index] + "\n\\end{document}\n";
+            job = service.saveSource(job.id(), source, job.revision());
+            service.preview(job.id());
+            long deadline = System.nanoTime() + 310_000_000_000L;
+            do { job = store.get(job.id()); if (List.of("READY", "FAILED").contains(job.previewStatus())) break; Thread.sleep(100); }
+            while (System.nanoTime() < deadline);
+            assertEquals(index == 2 ? "READY" : "FAILED", job.previewStatus(), service.compilerLog(job.id()));
+            var report = service.diagnostics(job.id());
+            final String expectedCode = codes[index];
+            var diagnostic = report.items().stream().filter(item -> item.code().equals(expectedCode) && "main.tex".equals(item.file())).findFirst().orElseThrow(() -> new AssertionError(report.rawLog()));
+            assertEquals(4, diagnostic.line()); assertEquals(job.revision(), report.revision());
+            assertEquals(index == 2 ? "warning" : "error", diagnostic.severity());
+            assertEquals(report, CompilerDiagnostics.load(store.directory(job.id())));
+            Path evidence = Path.of(System.getProperty("doc2tex.build-directory", "target"), "fidelity-evidence", "diagnostics", codes[index]);
+            Files.createDirectories(evidence); Files.writeString(evidence.resolve("compiler.log"), service.compilerLog(job.id()));
+            Files.writeString(evidence.resolve("main.tex"), source);
+            if (index == 2) { assertTrue(job.previewMessage().contains("warnings")); assertTrue(Files.size(service.pdf(job.id())) > 500); }
+        }
+        int compiledRevision = job.revision();
+        job = service.saveSource(job.id(), service.source(job.id()) + "% newer source\n", job.revision());
+        assertEquals("NOT_REQUESTED", job.previewStatus()); assertEquals(compiledRevision, service.diagnostics(job.id()).revision());
+        assertNotEquals(job.revision(), service.diagnostics(job.id()).revision());
+        Files.delete(store.directory(job.id()).resolve("compiler-diagnostics.json"));
+        assertNull(service.diagnostics(job.id()).revision(), "Legacy logs must not acquire a guessed revision");
+    }
 }

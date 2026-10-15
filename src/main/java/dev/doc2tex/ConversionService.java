@@ -195,22 +195,52 @@ class ConversionService {
     }
 
     private void compileLocked(String id) {
+        Job job = store.get(id);
+        Path directory = store.directory(id);
+        boolean logStarted = false;
         try {
-            Job job = store.get(id);
+            Path compilerLog = directory.resolve("preview.log");
+            JobStore.checkUnlinked(compilerLog);
+            Files.writeString(compilerLog, "", StandardCharsets.UTF_8);
+            logStarted = true;
             store.save(job.withPreview("COMPILING", "Building the PDF. The first build may download TeX packages."));
-            Path directory = store.directory(id);
             Path output = directory.resolve("output");
             Path preview = directory.resolve("preview-" + job.revision());
             Files.createDirectories(preview);
-            ToolRunner.Result result = runner.run(List.of(tools.tectonic(), "--untrusted", "--outdir", preview.toString(),
+            ToolRunner.Result result = runner.run(List.of(tools.tectonic(), "--untrusted", "--color", "never", "--outdir", preview.toString(),
                     "main.tex"), output, directory.resolve("preview.log"), properties.previewTimeoutSeconds());
             if (result.exitCode() != 0 || !Files.isRegularFile(preview.resolve("main.pdf")))
                 throw new IOException("PDF compilation failed. Check the compiler log, edit the source, and try again.");
-            boolean warnings = !inspector.review(directory.resolve("input.docx"), directory.resolve("preview.log")).compilerWarnings().isEmpty();
+            var diagnostics = CompilerDiagnostics.fromLog(compilerLog, job.revision(), "READY", null);
+            CompilerDiagnostics.save(directory, diagnostics);
+            boolean warnings = !diagnostics.items().isEmpty() || diagnostics.logTruncated();
             store.save(store.get(id).withPreview("READY", warnings
-                    ? "PDF built with warnings. Open Conversion review before using it." : "PDF preview is ready."));
+                    ? "PDF built with warnings. Check compiler diagnostics before using it." : "PDF preview is ready."));
         } catch (Exception exception) {
+            if (logStarted) try {
+                CompilerDiagnostics.save(directory, CompilerDiagnostics.fromLog(directory.resolve("preview.log"), job.revision(), "FAILED", exception.getMessage()));
+            } catch (IOException | RuntimeException reportError) { log.warn("Could not retain compiler diagnostics for {}", id, reportError); }
             fail(id, true, exception);
+        }
+    }
+
+    CompilerDiagnostics.Report diagnostics(String id) throws IOException {
+        try (var operation = store.read(id)) {
+            Job job = ready(id);
+            if (List.of("QUEUED", "COMPILING").contains(job.previewStatus()))
+                return new CompilerDiagnostics.Report(job.revision(), job.previewStatus(), false, false, List.of(), "");
+            Path directory = store.directory(id);
+            try {
+                var report = CompilerDiagnostics.load(directory);
+                if (report != null) {
+                    if (report.revision() > job.revision()) throw new IOException("Compiler diagnostics refer to a future revision.");
+                    if (Integer.valueOf(job.revision()).equals(report.revision()) && job.previewStatus().equals("FAILED") && !report.status().equals("FAILED"))
+                        return CompilerDiagnostics.parse(report.rawLog(), report.revision(), "FAILED", report.logTruncated(), job.previewMessage());
+                    return report;
+                }
+            } catch (IOException | RuntimeException exception) { log.warn("Cannot read diagnostics snapshot for {}", id, exception); }
+            // Legacy or damaged metadata cannot establish which source revision produced this log.
+            return CompilerDiagnostics.fromLog(directory.resolve("preview.log"), null, job.previewStatus(), job.previewMessage());
         }
     }
 
@@ -265,10 +295,17 @@ class ConversionService {
     }
 
     private String compilerLogLocked(String id) throws IOException {
-        store.get(id);
+        Job job = store.get(id);
+        if (!List.of("QUEUED", "COMPILING").contains(job.previewStatus())) {
+            try {
+                var report = CompilerDiagnostics.load(store.directory(id));
+                if (report != null) return report.rawLog() + (report.logTruncated() ? "\n[Log truncated after 64 KiB. Full tool output is retained in project storage: preview.log.]\n" : "");
+            } catch (IOException | RuntimeException ignored) { /* The original log remains readable if snapshot metadata is damaged. */ }
+        }
         Path log = store.directory(id).resolve("preview.log");
         if (!Files.isRegularFile(log)) return "The compiler has not produced a log yet.";
-        try (var input = Files.newInputStream(log)) { return new String(input.readNBytes(64 * 1024), StandardCharsets.UTF_8); }
+        var report = CompilerDiagnostics.fromLog(log, null, job.previewStatus(), null);
+        return report.rawLog() + (report.logTruncated() ? "\n[Log truncated after 64 KiB. Full tool output is retained in project storage: preview.log.]\n" : "");
     }
 
     void writeArchive(String id, OutputStream stream) throws IOException {

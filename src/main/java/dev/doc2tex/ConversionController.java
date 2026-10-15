@@ -87,6 +87,9 @@ class ConversionController {
     @GetMapping(value = "/jobs/{id}/preview/log", produces = "text/plain;charset=UTF-8")
     String compilerLog(@PathVariable String id) throws IOException { return service.compilerLog(id); }
 
+    @GetMapping("/jobs/{id}/diagnostics")
+    CompilerDiagnostics.Report diagnostics(@PathVariable String id) throws IOException { return service.diagnostics(id); }
+
     @GetMapping("/jobs/{id}/preview")
     ResponseEntity<StreamingResponseBody> pdf(@PathVariable String id) {
         service.pdf(id); // Validate before sending headers; the stream acquires its own lifetime lease.

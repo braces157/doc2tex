@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Progress } from '@/components/ui/progress'
 import { SourceWorkspace } from '@/SourceWorkspace'
 import { ConversionReview } from '@/components/ConversionReview'
+import { CompilerDiagnosticsPanel } from '@/components/CompilerDiagnosticsPanel'
 import { DraftRecovery } from '@/components/DraftRecovery'
 import type { Draft } from '@/drafts'
 const DocumentLibrary = lazy(() => import('@/DocumentLibrary').then(module => ({ default: module.DocumentLibrary })))
@@ -37,6 +38,7 @@ export interface WorkspaceModel {
   missingDocument: boolean; renamed: (job: Job) => void; deleted: (job: Job) => void
   versionsAvailable: boolean; restoreVersion: (revision: number) => Promise<boolean>
   editorRef: Ref<LatexEditorHandle>; commandKey: string
+  navigateSource: (line: number, revision: number) => void
 }
 
 export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
@@ -88,6 +90,7 @@ export function WorkspaceView({ model: m }: { model: WorkspaceModel }) {
               <TabsContent value="pdf" className="ui-tab-panel" aria-label="PDF preview"><SourceWorkspace editorRef={undefined} commandKey={m.commandKey} originalAvailable={!m.missingDocument} job={m.job} source={m.source} loading={(m.completed && m.sourceLoading) || m.converting} error={m.sourceError} onRetry={m.retrySource} readOnly={m.missingDocument || Boolean(m.recovery) || m.sourceLoading || Boolean(m.sourceError) || m.converting} view="pdf" onSourceChange={m.setSource} onBuild={m.buildPreview} compiling={m.compiling} saving={m.saving} dirty={m.dirty} previewAvailable={m.system?.tectonic ?? false} /></TabsContent>
               <TabsContent value="review" className="ui-tab-panel" aria-label="Conversion review"><ConversionReview review={m.review} job={m.job} /></TabsContent>
               <div className="editor-statusbar"><span><i className={`status-dot ${m.completed ? 'ready' : ''}`} />{m.sourceError ? 'Source unavailable' : m.completed && m.sourceLoading ? 'Loading source' : m.completed ? m.dirty ? 'Unsaved changes' : `main.tex · ${m.source.split('\n').length} lines` : m.converting ? 'Preparing your document' : 'Your source will appear here'}</span><span>UTF-8 <span className="statusbar-separator">/</span> LaTeX</span></div></div></Tabs>
+            {m.job && m.completed && <CompilerDiagnosticsPanel key={m.job.id} job={m.job} dirty={m.dirty} canNavigate={m.readyForActions && !m.saving && !m.compiling} onNavigate={m.navigateSource} />}
             <div className="ui-output-actions"><span><FolderSimple size={16} />Source + images. One tidy ZIP.</span><div><Button variant="outline" disabled={!m.versionsAvailable || m.compiling || m.saving} onClick={() => { toast.dismiss(); setVersionsOpen(true) }}>Saved versions</Button><Button variant="outline" onClick={m.save} disabled={!m.readyForActions || !m.dirty || m.saving || m.compiling}>{m.saving ? 'Saving…' : 'Save changes'}<kbd className="shortcut-hint" aria-hidden="true">{m.commandKey} S</kbd></Button><div className="ui-download-group"><Button className="ui-download-main" disabled={!m.readyForActions || m.saving || (m.compiling && m.dirty)} onClick={m.download}><ArrowDown size={16} />Download ZIP</Button><DropdownMenu><DropdownMenuTrigger asChild><Button className="ui-download-options" aria-label="More download options" disabled={!m.readyForActions}><DotsThree size={19} weight="bold" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuLabel>Take your work with you</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem onSelect={m.downloadTex}><BracketsCurly size={16} />Current LaTeX source</DropdownMenuItem><DropdownMenuItem disabled={m.job?.previewStatus !== 'READY' || m.dirty} onSelect={() => { if (m.job) downloadUrl(`/api/jobs/${m.job.id}/preview`, 'preview.pdf') }}><FileText size={16} />Saved PDF</DropdownMenuItem><DropdownMenuItem onSelect={() => { if (m.review) { void navigator.clipboard.writeText(JSON.stringify(m.review,null,2)).then(() => toast.success('Conversion review copied')).catch(() => toast.error('Clipboard access is unavailable')) } }}><ListChecks size={16} />Copy conversion review</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></div></div>
             {m.completed && warningCount > 0 && m.view !== 'review' && <button className="ui-review-prompt" onClick={() => m.setView('review')}><WarningCircle size={16} /><span>{warningCount} {warningCount === 1 ? 'detail' : 'details'} worth a closer look.</span><span>View review <ArrowRight size={13} /></span></button>}
           </section>
