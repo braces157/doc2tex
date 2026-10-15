@@ -120,7 +120,9 @@ class HardDocumentTest {
         assertArrayEquals(Files.readAllBytes(output.resolve("main.tex")), entries.get("main.tex"), "ZIP source differs from saved source");
         assertTrue(entries.containsKey("README.txt"));
         assertTrue(entries.containsKey("conversion-review.json"));
-        assertNotNull(JsonMapper.builder().build().readTree(entries.get("conversion-review.json")));
+        var mapper = JsonMapper.builder().build();
+        assertEquals(mapper.readTree(mapper.writeValueAsBytes(service.review(job.id()))),
+                mapper.readTree(entries.get("conversion-review.json")), "ZIP review differs from the job review");
         try (var files = Files.walk(output)) {
             for (Path file : files.filter(Files::isRegularFile).toList()) {
                 String name = output.relativize(file).toString().replace('\\', '/');
