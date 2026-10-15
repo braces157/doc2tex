@@ -102,11 +102,12 @@ class BibliographyIntegrationTest {
         var staleSetup = assertThrows(HttpClientErrorException.class, () -> client().post().uri(path + "/setup").body(Map.of("revision", plan.revision(), "sourceHash", plan.sourceHash())).retrieve().body(String.class));
         assertEquals(HttpStatus.CONFLICT, staleSetup.getStatusCode());
         Job queued = job.withPreview("QUEUED", "Synthetic busy state"); store.save(queued);
-        var busy = assertThrows(HttpClientErrorException.class, () -> client().post().uri(path).contentType(MediaType.MULTIPART_FORM_DATA).body(upload(committed, "valid.bib", queued.revision())).retrieve().body(String.class));
-        assertEquals(HttpStatus.CONFLICT, busy.getStatusCode());
-        assertArrayEquals(committed, client().get().uri(path + "/file").retrieve().body(byte[].class));
-        assertEquals(2, store.get(id).revision()); assertTrue(service.source(id).contains("missing_key"));
-        store.save(queued.withPreview("NOT_REQUESTED", ""));
+        try {
+            var busy = assertThrows(HttpClientErrorException.class, () -> client().post().uri(path).contentType(MediaType.MULTIPART_FORM_DATA).body(upload(committed, "valid.bib", queued.revision())).retrieve().body(String.class));
+            assertEquals(HttpStatus.CONFLICT, busy.getStatusCode());
+            assertArrayEquals(committed, client().get().uri(path + "/file").retrieve().body(byte[].class));
+            assertEquals(2, store.get(id).revision()); assertTrue(service.source(id).contains("missing_key"));
+        } finally { store.save(queued.withPreview("NOT_REQUESTED", "")); }
     }
 
     @ParameterizedTest @ValueSource(strings = {"article", "report"})

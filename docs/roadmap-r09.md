@@ -21,12 +21,14 @@ Acceptance checks include malformed/oversize/duplicate/unknown keys, UTF-8 bytes
 
 ## Verification
 
-- Frontend lint and production build pass; the initial bundle stays below Vite's 500 kB warning threshold (498.24 kB), with bibliography UI loaded separately.
-- All 114 desktop/mobile browser checks pass, including ten bibliography workflows covering import, exact setup cancel/apply, selection insertion/undo, search, save/build, replacement, matching restore/download, download retry, pending-import edit protection and stale responses.
-- All 108 backend/PDF tests pass with zero skipped. Targeted bibliography checks cover malformed/oversize/duplicate/unknown input, UTF-8, history limits, three interrupted-commit checkpoints, corrupt assets, owned/unmanaged caches, captured-font retention and historical downloads.
+- Frontend lint and production build pass; the initial bundle stays below Vite's 500 kB warning threshold (498.45 kB), with bibliography UI loaded separately.
+- The full 114-check desktop/mobile suite passed before review fixes. All twelve bibliography checks pass after review, including composition-blocked insertion feedback/retry, import, exact setup cancel/apply, selection insertion/undo, search, save/build, replacement, matching restore/download, download retry, pending-import edit protection and stale responses. Final-head CI reruns the complete suite.
+- The full 108-test backend/PDF suite passed with zero skipped before review fixes; all seven parser/API/PDF checks pass afterward. Targeted bibliography checks cover malformed/oversize/duplicate/unknown input, UTF-8, history limits, three interrupted-commit checkpoints, corrupt assets, owned/unmanaged caches, captured-font retention and historical downloads.
 - Article and Report fixtures each cite two imported keys and compile real PDFs with accented and Cyrillic bibliography titles. All three resulting pages were rendered and visually inspected; text extraction and compiler-log checks pass. Exported source, bibliography bytes, font and license are checked, and the ZIP recompiles in an isolated directory without project-external assets. TeX packages may still come from the normal Tectonic cache/network.
 - Desktop/mobile key search, source diff and saved-version dialogs were visually inspected. A mobile history overlap found during this check was fixed; the complete browser suite passed afterward.
 
 Evidence is generated under ignored `target/r09-*`, `target/fidelity-evidence/bibliography/` and `frontend/test-results/`. Fixtures use isolated synthetic storage. Real user project storage was not used.
+
+Code review identified percent-comment handling that differed from classic BibTeX. The pinned compiler reproduced a repeated-entry error for `% @book{duplicate,...}` followed by another definition (`target/r09-percent-probe/main.blg`). The parser now discovers that entry, rejects the duplicate and rejects percent text used as whitespace inside entries. Literal percent characters in field values are preserved. A skipped citation insertion now explains the reason and supports retry; synthetic busy-state cleanup also runs in `finally`.
 
 The integration intentionally supports one attachment and a documented ASCII citation-key subset. It validates structure rather than certifying bibliographic correctness or every TeX macro. No clean-machine/offline package availability claim is made here; packaging and setup diagnostics belong to R10.

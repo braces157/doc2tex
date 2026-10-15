@@ -108,6 +108,17 @@ async function selectVersion(page: Page, revision: number) {
   return history
 }
 
+test('a citation blocked by active text composition explains the skipped insertion and can be retried', async ({ page }) => {
+  await setup(page); await upload(page); await expect(panel(page)).toContainText('original.bib')
+  await editor(page).focus(); await editor(page).dispatchEvent('compositionstart', { data: '' })
+  await panel(page).getByRole('button', { name: 'Insert citation doe2024', exact: true }).evaluate((button: HTMLButtonElement) => button.click())
+  await expect(page.getByText('Citation was not inserted. Finish text composition and wait for the source editor, then try again.', { exact: true })).toBeVisible()
+  await expect(editor(page)).toHaveText(SOURCE, { useInnerText: true })
+  await editor(page).dispatchEvent('compositionend', { data: '' })
+  await panel(page).getByRole('button', { name: 'Insert citation doe2024', exact: true }).click()
+  await expect(editor(page)).toContainText('\\cite{doe2024}')
+})
+
 test('import, exact setup preview, undoable insertion, Unicode search and build use one saved bibliography', async ({ page }, testInfo) => {
   const state = await setup(page); await upload(page); await expect(panel(page)).toContainText('original.bib')
   await panel(page).getByRole('button', { name: 'Preview bibliography setup', exact: true }).click()

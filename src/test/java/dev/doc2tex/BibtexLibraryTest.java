@@ -20,6 +20,16 @@ class BibtexLibraryTest {
         assertTrue(values.warnings().stream().anyMatch(warning -> warning.contains("@preamble")));
     }
 
+    @Test void percentTextDoesNotHideEntriesOrActAsWhitespaceInsideEntries() {
+        var hidden = BibtexLibrary.parse(bytes("% @book{hidden,title={Visible to BibTeX}}"));
+        assertEquals("hidden", hidden.entries().getFirst().key());
+        var duplicate = assertThrows(ApiException.class, () -> BibtexLibrary.parse(bytes("% @book{duplicate,title={Hidden entry}}\n@book{duplicate,title={Active entry}}")));
+        assertTrue(duplicate.getMessage().contains("Duplicate citation key 'duplicate'"));
+        assertThrows(ApiException.class, () -> BibtexLibrary.parse(bytes("@book{key, % unsupported comment\n title={Title}}")));
+        assertEquals("Literal 50% text", BibtexLibrary.parse(bytes("@book{key,title={Literal 50% text}}")).entries().getFirst().title());
+        assertEquals(1, BibtexLibrary.parse(bytes("@comment{Ignore @book{key,title={Nested}}}\n@book{key,title={Active}}")).entries().size());
+    }
+
     @Test void malformedDuplicateUnsafeAndOversizeInputsHaveActionableErrors() {
         for (String input : java.util.List.of("", "not a bibliography", "@book{key,title={unclosed}", "@book{key,title=\"unclosed}",
                 "@book{bad/key,title={unsafe}}", "@book{key,title={one},title={two}}", "@book{key,title=unbalanced{text}",

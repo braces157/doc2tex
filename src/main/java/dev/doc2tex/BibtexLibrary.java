@@ -38,7 +38,6 @@ final class BibtexLibrary {
         Parser(String text) { this.text = text; }
         Parsed parse() {
             while (index < text.length()) {
-                if (peek() == '%') { comment(); continue; }
                 if (peek() != '@') { take(); continue; }
                 take(); space(); int entryLine = line; String type = identifier().toLowerCase(Locale.ROOT); space();
                 char open = take(); if (open != '{' && open != '(') throw error("Expected '{' or '(' after the entry type.");
@@ -84,7 +83,7 @@ final class BibtexLibrary {
                 else if (next == '"') { take(); term = quoted(); }
                 else {
                     int start = index;
-                    while (index < text.length() && !Character.isWhitespace(peek()) && peek() != ',' && peek() != '#' && peek() != entryClose && peek() != '%') take();
+                    while (index < text.length() && !Character.isWhitespace(peek()) && peek() != ',' && peek() != '#' && peek() != entryClose) take();
                     if (start == index) throw error("A field value is missing or unbalanced.");
                     term = text.substring(start, index);
                     if (!term.matches("(?:[0-9]+|[A-Za-z_][A-Za-z0-9_.:-]{0,63})")) throw error("Put field text in braces or quotes; bare values must be numbers or string macro names.");
@@ -120,8 +119,7 @@ final class BibtexLibrary {
             if (start == index || index - start > 64) throw error("A bibliography entry type or field name is invalid.");
             return text.substring(start, index);
         }
-        void space() { while (index < text.length()) { if (Character.isWhitespace(peek())) take(); else if (peek() == '%') comment(); else break; } }
-        void comment() { while (index < text.length() && take() != '\n') { /* Skip one comment line. */ } }
+        void space() { while (index < text.length() && Character.isWhitespace(peek())) take(); }
         char peek() { return index < text.length() ? text.charAt(index) : '\0'; }
         char take() { if (index >= text.length()) throw error("Unexpected end of bibliography."); char next = text.charAt(index++); if (next == '\n') line++; return next; }
         void expect(char value) { if (take() != value) throw error("Expected '" + value + "'. Check the bibliography syntax."); }

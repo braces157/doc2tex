@@ -371,8 +371,10 @@ export default function App() {
     setView('source')
   }
   const revealCitation = useEffectEvent((id: string, key: string, revision: number) => {
-    if (currentId.current !== id || job?.revision !== revision || !readyForActions || saving || compiling || !/^[A-Za-z0-9_][A-Za-z0-9:._+-]{0,127}$/.test(key)) return
-    editorRef.current?.insertText(`\\cite{${key}}`)
+    if (currentId.current !== id || job?.revision !== revision || !readyForActions || saving || compiling || !/^[A-Za-z0-9_][A-Za-z0-9:._+-]{0,127}$/.test(key)) {
+      toast.error('Citation was not inserted. Wait for the document to finish updating, then try again.'); return
+    }
+    if (composition.current.active || !editorRef.current?.insertText(`\\cite{${key}}`)) toast.error('Citation was not inserted. Finish text composition and wait for the source editor, then try again.')
   })
   const insertCitation = (key: string, revision: number) => {
     if (!job || job.revision !== revision || !readyForActions || saving || compiling) return
