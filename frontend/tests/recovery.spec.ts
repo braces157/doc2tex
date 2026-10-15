@@ -220,15 +220,22 @@ test('saving in one window does not delete a draft updated by another window', a
   expect(await readFile((await (await downloading).path())!, 'utf8')).toBe(otherEdits)
 })
 
-test('an empty edit remains editable and can be recovered', async ({ page, isMobile }) => {
-  await workspace(page)
+for (const blank of [{ name: 'empty', source: '' }, { name: 'whitespace-only', source: ' \n\t ' }]) {
+test(`a ${blank.name} draft stays editable and recoverable without allowing save or build`, async ({ page, isMobile }) => {
+  const state = await workspace(page)
   await openDocument(page, isMobile)
-  await editor(page).fill('')
+  await editor(page).fill(blank.source)
   await expect(editor(page)).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Download ZIP', exact: true })).toBeDisabled()
+  await page.getByRole('tab', { name: 'Preview', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Build PDF preview', exact: true })).toBeDisabled()
+  expect(state.saves).toBe(0)
   await page.reload()
   await recovery(page).getByRole('button', { name: 'Restore draft', exact: true }).click()
-  await expect(editor(page)).toHaveValue('')
+  await expect(editor(page)).toHaveValue(blank.source)
   await expect(editor(page)).toBeEnabled()
   await editor(page).fill(EDITED)
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()
 })
+}

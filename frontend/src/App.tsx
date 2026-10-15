@@ -152,7 +152,7 @@ export default function App() {
   }
 
   const save = async () => {
-    if (!job || !sourceDocument.ready || sourceDocument.recovery || saving || busy) return null
+    if (!job || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || saving || busy) return null
     setSaving(true); setError('')
     try {
       const next = await api<Job>(`/jobs/${job.id}/source`, { method: 'PUT',
@@ -167,7 +167,7 @@ export default function App() {
   }
 
   const buildPreview = async () => {
-    if (!job || compiling || !sourceDocument.ready || sourceDocument.recovery || busy) return
+    if (!job || !source.trim() || compiling || !sourceDocument.ready || sourceDocument.recovery || busy) return
     setError(''); setPreviewStarting(true)
     try {
       const next = dirty ? await save() : job
@@ -189,12 +189,12 @@ export default function App() {
   }
 
   const download = async () => {
-    if (!job || !sourceDocument.ready || sourceDocument.recovery || busy) return
+    if (!job || !source.trim() || !sourceDocument.ready || sourceDocument.recovery || busy) return
     const next = dirty ? await save() : job
     if (next) window.location.assign(`/api/jobs/${next.id}/download`)
   }
 
-  const readyForActions = completed && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source)
+  const readyForActions = completed && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source.trim())
   return <>
     <WorkspaceView model={{ system, history, job, file, template, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
