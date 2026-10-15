@@ -303,7 +303,7 @@ There is no measured customer baseline yet. Establish one before claiming percen
 
 ## Ready-to-use next-agent prompt
 
-> Read repository instructions, `docs/roadmap.md`, and `docs/development.md`. Implement R01, the searchable document library, as one focused change. Preserve `GET /api/jobs` compatibility, all existing drafts/conflict protections, and the local-only security model. Add a server-paginated library route and an accessible desktop/mobile library UI. Search before pagination; ensure jobs beyond the latest 30 can be found and an older active document restores by ID. Use isolated synthetic storage in tests. Run the relevant backend and browser checks plus frontend lint/build, update API documentation, and report completed acceptance checks and any limitations. Do not start R02 or later tickets.
+> Read repository instructions, `docs/roadmap.md`, `docs/development.md`, and the progress ledger. R01 is implemented in [PR #7](https://github.com/braces157/doc2tex/pull/7): finish its CodeRabbit review, address actionable findings, wait for green Windows/Linux CI on the final commit, and merge before starting R02. Then implement R02, rename and safe deletion, as its own focused PR using the acceptance checks above. Preserve draft recovery, revision conflict protection, and the local-only security model. Use isolated synthetic storage for lifecycle/deletion tests. Repeat the review, CI, and merge gate for each subsequent roadmap ticket; never begin the next ticket before the preceding PR is merged. Keep this prompt and the ledger current.
 
 ## Progress ledger
 
@@ -311,7 +311,7 @@ Update the status and evidence link after each implementation; the roadmap's exi
 
 | Ticket | Status | Implementation / verification evidence |
 | --- | --- | --- |
-| R01 | Implemented; awaiting PR review and CI | [Implementation and verification](roadmap-r01.md) |
+| R01 | Implemented; awaiting final PR review and CI | [PR #7](https://github.com/braces157/doc2tex/pull/7), [implementation and verification](roadmap-r01.md) |
 | R02 | Proposed | — |
 | R03 | Proposed | — |
 | R04 | Proposed | — |
