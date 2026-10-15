@@ -53,6 +53,24 @@ export interface ConversionReview {
   scope: string
 }
 
+export interface CompilerDiagnostic {
+  severity: 'error' | 'warning'
+  code: string
+  title: string
+  explanation: string
+  file: string | null
+  line: number | null
+  raw: string
+}
+
+export interface CompilerReport {
+  revision: number | null
+  status: string
+  logTruncated: boolean
+  diagnosticsTruncated: boolean
+  items: CompilerDiagnostic[]
+}
+
 export async function api<T>(path: string, options: RequestInit = {}, text = false): Promise<T> {
   const response = await fetch(`/api${path}`, options)
   if (!response.ok) {
