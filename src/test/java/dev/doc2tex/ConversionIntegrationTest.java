@@ -26,6 +26,7 @@ class ConversionIntegrationTest {
     @LocalServerPort int port;
     @Autowired Tools tools;
     @Autowired JobStore store;
+    @Autowired ConversionService service;
     private RestClient client() {
         return RestClient.builder().baseUrl("http://127.0.0.1:" + port)
                 .requestFactory(new JdkClientHttpRequestFactory()).build();
@@ -67,6 +68,69 @@ class ConversionIntegrationTest {
             var error = assertThrows(HttpClientErrorException.class,
                     () -> client().get().uri("/api/library?" + query).retrieve().toBodilessEntity());
             assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode(), query);
+        }
+    }
+
+    @Test void metadataAndDeleteRoutesPreserveOriginalAndRejectBusyJobs() throws Exception {
+        Job job = new Job(java.util.UUID.randomUUID().toString(), "lifecycle-original.docx", "article", "COMPLETED",
+                "NOT_REQUESTED", "", "", java.time.Instant.now(), java.time.Instant.now(), 100, 3);
+        store.save(job);
+        String base = "/api/jobs/" + job.id();
+        Job renamed = client().patch().uri(base).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("displayName", "Renamed paper ภาษาไทย")).retrieve().body(Job.class);
+        assertNotNull(renamed); assertEquals(job.filename(), renamed.filename());
+        assertEquals("Renamed paper ภาษาไทย", renamed.displayName()); assertEquals(3, renamed.revision());
+        for (Map<String, Object> body : List.<Map<String, Object>>of(Map.of(), Map.of("displayName", "bad\nname"), Map.of("displayName", "x".repeat(201)))) {
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(HttpClientErrorException.class,
+                    () -> client().patch().uri(base).contentType(MediaType.APPLICATION_JSON).body(body).retrieve().toBodilessEntity()).getStatusCode());
+        }
+        store.save(renamed.withPreview("QUEUED", ""));
+        assertEquals(HttpStatus.CONFLICT, assertThrows(HttpClientErrorException.class,
+                () -> client().delete().uri(base).retrieve().toBodilessEntity()).getStatusCode());
+        store.save(renamed);
+        assertEquals(HttpStatus.NO_CONTENT, client().delete().uri(base).retrieve().toBodilessEntity().getStatusCode());
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(HttpClientErrorException.class,
+                () -> client().put().uri(base + "/source").contentType(MediaType.APPLICATION_JSON)
+                        .body(Map.of("source", "Cannot resurrect deleted data", "revision", 3)).retrieve().toBodilessEntity()).getStatusCode());
+        assertFalse(Files.exists(store.directory(job.id())));
+    }
+
+    @Test void activeArchiveAndPdfStreamsExcludeDeletionUntilTheirLastByte() throws Exception {
+        for (boolean pdf : List.of(false, true)) {
+            Job job = new Job(java.util.UUID.randomUUID().toString(), "stream-test.docx", "article", "COMPLETED",
+                    "READY", "", "", java.time.Instant.now(), java.time.Instant.now(), 100, 0);
+            store.save(job);
+            var directory = store.directory(job.id());
+            Files.createDirectories(directory.resolve("output"));
+            Files.createDirectories(directory.resolve("preview-0"));
+            Files.write(directory.resolve("input.docx"), SampleDocument.create());
+            Files.writeString(directory.resolve("output/main.tex"), "Synthetic stream source");
+            Files.writeString(directory.resolve("preview-0/main.pdf"), "Synthetic PDF bytes");
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            var bytes = new java.io.ByteArrayOutputStream();
+            var blocked = new java.io.OutputStream() {
+                @Override public void write(int value) throws java.io.IOException {
+                    entered.countDown();
+                    try { if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new java.io.IOException("Stream gate timed out"); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new java.io.IOException(exception); }
+                    bytes.write(value);
+                }
+            };
+            var task = new java.util.concurrent.FutureTask<Void>(() -> {
+                if (pdf) service.writePdf(job.id(), blocked); else service.writeArchive(job.id(), blocked);
+                return null;
+            });
+            Thread thread = Thread.ofPlatform().start(task);
+            try {
+                assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                assertEquals(HttpStatus.CONFLICT, assertThrows(HttpClientErrorException.class,
+                        () -> client().delete().uri("/api/jobs/" + job.id()).retrieve().toBodilessEntity()).getStatusCode());
+            } finally { release.countDown(); thread.join(10000); }
+            task.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(bytes.size() > 0);
+            store.delete(job.id());
+            assertFalse(Files.exists(directory));
         }
     }
 

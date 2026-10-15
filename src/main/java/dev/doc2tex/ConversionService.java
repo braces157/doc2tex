@@ -82,6 +82,10 @@ class ConversionService {
     }
 
     private void convert(String id) {
+        try (var operation = store.worker(id)) { convertLocked(id); }
+    }
+
+    private void convertLocked(String id) {
         try {
             Job job = store.get(id);
             store.save(job.withStatus("CONVERTING", "Reading document structure and writing LaTeX."));
@@ -115,7 +119,11 @@ class ConversionService {
         }
     }
 
-    synchronized Job saveSource(String id, String source, int revision) throws IOException {
+    Job saveSource(String id, String source, int revision) throws IOException {
+        try (var operation = store.edit(id)) { return saveSourceLocked(id, source, revision); }
+    }
+
+    private Job saveSourceLocked(String id, String source, int revision) throws IOException {
         Job job = ready(id);
         if (job.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed in another window. Reopen this conversion before saving.");
         if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) throw new ApiException(HttpStatus.CONFLICT,
@@ -131,7 +139,11 @@ class ConversionService {
         return edited;
     }
 
-    synchronized Job preview(String id) throws IOException {
+    Job preview(String id) throws IOException {
+        try (var operation = store.edit(id)) { return previewLocked(id); }
+    }
+
+    private Job previewLocked(String id) throws IOException {
         Job job = ready(id);
         if (List.of("QUEUED", "COMPILING", "READY").contains(job.previewStatus())) return job;
         if (!tools.available(tools.tectonic())) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -147,6 +159,10 @@ class ConversionService {
     }
 
     private void compile(String id) {
+        try (var operation = store.worker(id)) { compileLocked(id); }
+    }
+
+    private void compileLocked(String id) {
         try {
             Job job = store.get(id);
             store.save(job.withPreview("COMPILING", "Building the PDF. The first build may download TeX packages."));
@@ -166,9 +182,17 @@ class ConversionService {
         }
     }
 
-    String source(String id) throws IOException { ready(id); return Files.readString(store.directory(id).resolve("output/main.tex")); }
+    String source(String id) throws IOException {
+        try (var operation = store.read(id)) {
+            ready(id); return Files.readString(store.directory(id).resolve("output/main.tex"));
+        }
+    }
 
     DocumentInspector.Review review(String id) {
+        try (var operation = store.read(id)) { return reviewLocked(id); }
+    }
+
+    private DocumentInspector.Review reviewLocked(String id) {
         Job job = store.get(id);
         Path directory = store.directory(id);
         Path log = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
@@ -176,6 +200,10 @@ class ConversionService {
     }
 
     Path pdf(String id) {
+        try (var operation = store.read(id)) { return pdfLocked(id); }
+    }
+
+    private Path pdfLocked(String id) {
         Job job = ready(id);
         if (!job.previewStatus().equals("READY")) throw new ApiException(HttpStatus.CONFLICT, "Build the PDF preview first.");
         Path pdf = store.directory(id).resolve("preview-" + job.revision()).resolve("main.pdf");
@@ -183,7 +211,15 @@ class ConversionService {
         return pdf;
     }
 
+    void writePdf(String id, OutputStream stream) throws IOException {
+        try (var operation = store.read(id)) { Files.copy(pdfLocked(id), stream); }
+    }
+
     String compilerLog(String id) throws IOException {
+        try (var operation = store.read(id)) { return compilerLogLocked(id); }
+    }
+
+    private String compilerLogLocked(String id) throws IOException {
         store.get(id);
         Path log = store.directory(id).resolve("preview.log");
         if (!Files.isRegularFile(log)) return "The compiler has not produced a log yet.";
@@ -191,6 +227,10 @@ class ConversionService {
     }
 
     void writeArchive(String id, OutputStream stream) throws IOException {
+        try (var operation = store.read(id)) { writeArchiveLocked(id, stream); }
+    }
+
+    private void writeArchiveLocked(String id, OutputStream stream) throws IOException {
         ready(id);
         Path output = store.directory(id).resolve("output");
         try (ZipOutputStream zip = new ZipOutputStream(stream); var paths = Files.walk(output)) {

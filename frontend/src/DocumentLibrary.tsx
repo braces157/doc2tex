@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from './api'
+import { api, jobTitle } from './api'
 import type { Job, LibraryPage } from './api'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './components/ui/alert-dialog'
 
-export function DocumentLibrary({ open, onOpenChange, onSelect, disabled }: {
+export function DocumentLibrary({ open, onOpenChange, onSelect, onRenamed, onDeleted, disabled }: {
   open: boolean; onOpenChange: (open: boolean) => void; onSelect: (job: Job) => void; disabled: boolean
+  onRenamed: (job: Job) => void; onDeleted: (job: Job) => void
 }) {
   const [input, setInput] = useState('')
   const [filters, setFilters] = useState({ query: '', status: '', sort: 'newest', page: 0 })
@@ -16,6 +19,27 @@ export function DocumentLibrary({ open, onOpenChange, onSelect, disabled }: {
   const result = current?.result ?? null
   const error = current?.error ?? ''
   const loading = !current
+  const [action, setAction] = useState<{ kind: 'rename' | 'delete'; job: Job } | null>(null)
+  const [name, setName] = useState('')
+  const [working, setWorking] = useState(false)
+  const [mutationError, setMutationError] = useState('')
+  const manage = (kind: 'rename' | 'delete', job: Job) => { setMutationError(''); setName(job.displayName ?? ''); setAction({ kind, job }) }
+  const closeAction = () => { if (!working) setAction(null) }
+  const mutate = async () => {
+    if (!action || working) return
+    setWorking(true); setMutationError('')
+    try {
+      if (action.kind === 'rename') {
+        const next = await api<Job>(`/jobs/${action.job.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ displayName: name }) })
+        onRenamed(next)
+      } else {
+        await api<void>(`/jobs/${action.job.id}`, { method: 'DELETE' })
+        onDeleted(action.job)
+      }
+      setAction(null)
+    } catch (e) { setMutationError(e instanceof Error ? e.message : 'The document could not be updated. Try again.') }
+    finally { setWorking(false); setAttempt(value => value + 1) }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -27,7 +51,7 @@ export function DocumentLibrary({ open, onOpenChange, onSelect, disabled }: {
     return () => controller.abort()
   }, [open, filters, request])
 
-  return <Dialog open={open} onOpenChange={onOpenChange}>
+  return <><Dialog open={open} onOpenChange={value => { if (!working) { onOpenChange(value); if (!value) setAction(null) } }}>
     <DialogContent className="ui-library-dialog">
       <DialogHeader><DialogTitle>All documents</DialogTitle><DialogDescription>Find any conversion saved on this machine.</DialogDescription></DialogHeader>
       <form className="ui-library-controls" onSubmit={event => { event.preventDefault(); setFilters(previous => ({ ...previous, query: input, page: 0 })) }}>
@@ -47,10 +71,16 @@ export function DocumentLibrary({ open, onOpenChange, onSelect, disabled }: {
           <p role="status">{result.total} {result.total === 1 ? 'document' : 'documents'} found</p>
           {result.items.length === 0 && <p>{filters.page > 0 ? 'No documents on this page. Go back to the previous page.' : 'No matching documents. Try another filename or status.'}</p>}
           <ul className="ui-library-list">{result.items.map(job => <li key={job.id}>
-            <button disabled={disabled} onClick={() => { onOpenChange(false); onSelect(job) }}>
-              <strong>{job.filename}</strong>
+            <button aria-label={`Open ${jobTitle(job)}`} disabled={disabled || working || job.deletionPending} onClick={() => { onOpenChange(false); onSelect(job) }}>
+              <strong>{jobTitle(job)}</strong>
+              {job.displayName && <span>Original: {job.filename}</span>}
               <span><time dateTime={job.createdAt}>{new Date(job.createdAt).toLocaleString()}</time> · {job.template} · {job.status.toLowerCase()}</span>
+              {job.deletionPending && <span>Deletion incomplete. Retry Delete to finish cleanup.</span>}
             </button>
+            <div className="ui-library-row-actions">
+              <Button variant="ghost" disabled={disabled || working || job.deletionPending} aria-label={`Rename ${jobTitle(job)}`} onClick={() => manage('rename', job)}>Rename</Button>
+              <Button variant="ghost" disabled={disabled || working} aria-label={`${job.deletionPending ? 'Retry delete' : 'Delete'} ${jobTitle(job)}`} onClick={() => manage('delete', job)}>{job.deletionPending ? 'Retry delete' : 'Delete'}</Button>
+            </div>
           </li>)}</ul>
         </>}
       </div>
@@ -61,4 +91,22 @@ export function DocumentLibrary({ open, onOpenChange, onSelect, disabled }: {
       </nav>
     </DialogContent>
   </Dialog>
+    <Dialog open={action?.kind === 'rename'} onOpenChange={value => { if (!value) closeAction() }}>
+      <DialogContent><DialogHeader><DialogTitle>Rename document</DialogTitle><DialogDescription>The original filename stays {action?.job.filename}. Clear the display name to use it again.</DialogDescription></DialogHeader>
+        <form className="ui-document-rename" onSubmit={event => { event.preventDefault(); void mutate() }}>
+          <label>Display name<input value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={working} autoFocus /></label>
+          {mutationError && <p role="alert">{mutationError}</p>}
+          <div><Button variant="outline" type="button" onClick={closeAction} disabled={working}>Cancel</Button><Button type="submit" disabled={working}>{working ? 'Saving…' : 'Save name'}</Button></div>
+        </form>
+      </DialogContent>
+    </Dialog>
+    <AlertDialog open={action?.kind === 'delete'} onOpenChange={value => { if (!value) closeAction() }}>
+      <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete {action ? jobTitle(action.job) : 'document'}?</AlertDialogTitle>
+        <AlertDialogDescription>This permanently removes the original Word document, source, saved versions, media, and PDF previews from this machine. Unsaved edits in this document will be discarded in this tab. Other open tabs should download any unsaved text before leaving.</AlertDialogDescription>
+      </AlertDialogHeader>
+        {mutationError && <p role="alert">{mutationError}</p>}
+        <AlertDialogFooter><AlertDialogCancel disabled={working} onClick={closeAction}>Cancel</AlertDialogCancel><AlertDialogAction disabled={working} onClick={event => { event.preventDefault(); void mutate() }}>{working ? 'Deleting…' : 'Delete document'}</AlertDialogAction></AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </>
 }
