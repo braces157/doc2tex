@@ -11,7 +11,7 @@ const issue: CompilerDiagnostic = { severity: 'error', code: 'undefined-command'
 async function setup(page: Page, report: CompilerReport = { revision: 1, status: 'FAILED', logTruncated: false, diagnosticsTruncated: false, items: [issue] }) {
   const job: Job = { id: ID, filename: 'diagnostics.docx', template: 'article', status: 'COMPLETED', previewStatus: 'FAILED',
     message: 'Ready', previewMessage: 'PDF compilation failed.', createdAt: '2026-10-16T00:00:00Z', updatedAt: '2026-10-16T00:00:00Z', size: 50, revision: 1 }
-  const state = { job, report, source: SOURCE, fail: false, gate: null as Promise<void> | null }
+  const state = { job, report, source: SOURCE, fail: false, buildStatus: 'READY' as 'READY' | 'FAILED', gate: null as Promise<void> | null }
   await page.context().route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body })
@@ -34,8 +34,8 @@ async function setup(page: Page, report: CompilerReport = { revision: 1, status:
       return route.fulfill({ contentType: 'text/plain', body: state.source })
     }
     if (path.endsWith('/preview') && route.request().method() === 'POST') {
-      state.job = { ...state.job, previewStatus: 'READY' }
-      state.report = { revision: state.job.revision, status: 'READY', logTruncated: false, diagnosticsTruncated: false, items: [] }
+      state.job = { ...state.job, previewStatus: state.buildStatus, updatedAt: new Date().toISOString() }
+      state.report = { revision: state.job.revision, status: state.buildStatus, logTruncated: false, diagnosticsTruncated: false, items: state.buildStatus === 'FAILED' ? [issue] : [] }
       return json(state.job, 202)
     }
     return json({ message: 'Unexpected request' }, 404)
@@ -133,4 +133,19 @@ test('a delayed completed-build response cannot display the previous build resul
   await expect(panel.getByText(/These diagnostics are stale/)).toHaveCount(0)
   release()
   await expect(panel.getByRole('heading', { name: 'PDF built successfully', exact: true })).toBeVisible()
+})
+
+test('a same-revision retry ending in the same status cannot revive an earlier report', async ({ page }) => {
+  const state = await setup(page)
+  const panel = page.getByRole('region', { name: 'Compiler diagnostics' })
+  await expect(panel.getByRole('heading', { name: 'PDF build failed', exact: true })).toBeVisible()
+  let release!: () => void
+  state.gate = new Promise<void>(resolve => { release = resolve }); state.buildStatus = 'FAILED'
+  await page.getByRole('tab', { name: 'Preview', exact: true }).click()
+  await page.getByRole('button', { name: 'Build PDF preview', exact: true }).click()
+  await expect(panel.getByRole('heading', { name: 'Loading compiler diagnostics…', exact: true })).toBeVisible()
+  await expect(panel.getByRole('button')).toHaveCount(0)
+  release()
+  await expect(panel.getByRole('heading', { name: 'PDF build failed', exact: true })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Go to source line 3', exact: true })).toBeEnabled()
 })

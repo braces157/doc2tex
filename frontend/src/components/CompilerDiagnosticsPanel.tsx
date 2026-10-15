@@ -5,8 +5,8 @@ import { api } from '@/api'
 export function CompilerDiagnosticsPanel({ job, dirty, canNavigate, onNavigate }: { job: Job; dirty: boolean; canNavigate: boolean; onNavigate: (line: number, revision: number) => void }) {
   const [result, setResult] = useState<{ key: string; report: CompilerReport | null; error: string } | null>(null)
   const [retry, setRetry] = useState(0)
-  const { id, revision, previewStatus } = job
-  const key = `${id}|${revision}|${previewStatus}|${retry}`
+  const { id, revision, previewStatus, updatedAt } = job
+  const key = `${id}|${revision}|${previewStatus}|${updatedAt}|${retry}`
   useEffect(() => {
     const controller = new AbortController()
     if (previewStatus === 'QUEUED' || previewStatus === 'COMPILING') return
