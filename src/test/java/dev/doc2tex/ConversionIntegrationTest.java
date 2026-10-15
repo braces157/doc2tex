@@ -102,6 +102,26 @@ class ConversionIntegrationTest {
         assertEquals(1, advanced.revision()); assertEquals(0, advanced.decisions().getFirst().revision()); assertEquals(1, advanced.decisions().getFirst().applicableRevision());
     }
 
+    @Test void captionRepairRoutesPreviewApplyConflictAndRestoreThroughNormalVersionHistory() throws Exception {
+        assumeTrue(tools.available(tools.pandoc()), "Install Pandoc for caption repair HTTP checks");
+        byte[] corpus;
+        try (var input = getClass().getResourceAsStream("/corpus/research-complex.docx")) { assertNotNull(input); corpus = input.readAllBytes(); }
+        Job job = await(upload("caption-repair.docx", corpus, "article")); assertEquals("COMPLETED", job.status());
+        String base = "/api/jobs/" + job.id();
+        String original = client().get().uri(base + "/source").retrieve().body(String.class);
+        var plan = client().get().uri(base + "/caption-repairs").retrieve().body(CaptionRepairs.Plan.class);
+        assertNotNull(plan); assertEquals(1, plan.proposals().size(), plan.toString());
+        assertEquals(original, client().get().uri(base + "/source").retrieve().body(String.class));
+        var body = Map.of("revision", 0, "sourceHash", plan.sourceHash(), "proposalIds", plan.proposals().stream().map(CaptionRepairs.Proposal::id).toList());
+        var repaired = client().post().uri(base + "/caption-repairs").contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(ConversionService.RestoredDocument.class);
+        assertEquals(1, repaired.job().revision()); assertFalse(repaired.source().contains("\\DocCaptionNumber{Figure}{1}{}"));
+        assertEquals(original, client().get().uri(base + "/versions/0/source").retrieve().body(String.class));
+        assertEquals(HttpStatus.CONFLICT, assertThrows(HttpClientErrorException.class, () -> client().post().uri(base + "/caption-repairs").contentType(MediaType.APPLICATION_JSON).body(body).retrieve().toBodilessEntity()).getStatusCode());
+        assertEquals(repaired.source(), client().get().uri(base + "/source").retrieve().body(String.class));
+        var restored = client().post().uri(base + "/versions/0/restore").contentType(MediaType.APPLICATION_JSON).body(Map.of("revision", 1)).retrieve().body(ConversionService.RestoredDocument.class);
+        assertEquals(2, restored.job().revision()); assertEquals(original, restored.source());
+    }
+
     @Test void libraryRouteReturnsPagesAndRejectsInvalidParameters() throws Exception {
         Job older = new Job(java.util.UUID.randomUUID().toString(), "library-only-résumé.docx", "report",
                 "COMPLETED", "NOT_REQUESTED", "", "", java.time.Instant.EPOCH, java.time.Instant.EPOCH, 20, 0);
