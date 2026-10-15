@@ -200,6 +200,10 @@ final class WordReferenceSupport {
         } else if (command.equals("PAGEREF") || command.equals("NOTEREF")) {
             String[] words = instruction.split("\\s+"); if (words.length > 1) target = words[1];
         }
+        if (!List.of("REF", "PAGEREF", "NOTEREF").contains(command) || !validBookmark(target)) {
+            fields.add(new Field("", target, cached, false, reason));
+            return false;
+        }
         String marker = "doc2tex-ref-field-" + (fields.size() + 1);
         while (titles.contains(marker)) marker += "-x";
         boolean changed = boundaries && !frame.nested && rewrite(frame, target, marker);
