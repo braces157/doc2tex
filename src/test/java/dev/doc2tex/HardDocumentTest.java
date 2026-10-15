@@ -90,10 +90,14 @@ class HardDocumentTest {
             assertTrue(source.contains("\\footnote"), source);
             assertTrue(review.findings().stream().anyMatch(finding -> finding.code().equals("merged")));
             assertTrue(review.findings().stream().anyMatch(finding -> finding.code().equals("captions")));
+            assertTrue(review.items().stream().anyMatch(evidence -> evidence.code().equals("merged") && evidence.excerpt().contains("Merged vertical group")));
+            assertTrue(review.items().stream().anyMatch(evidence -> evidence.code().equals("captions") && evidence.excerpt().contains("Figure 1 Observations")));
         }
         if (filename.equals("revisions-layout.docx")) {
             for (String code : List.of("revisions", "headers", "charts", "textboxes", "comments"))
                 assertTrue(review.findings().stream().anyMatch(finding -> finding.code().equals(code)), "Missing review flag " + code);
+            assertTrue(review.originalText().stream().anyMatch(paragraph -> paragraph.part().equals("word/header1.xml") && paragraph.text().contains("HEADER_CONTEXT_NOT_BODY")));
+            assertTrue(review.items().stream().anyMatch(evidence -> evidence.code().equals("revisions") && evidence.excerpt().contains("REMOVED_OLD_DECISION") && evidence.excerpt().contains("PRESERVE_ACCEPTED_DECISION")));
         }
         if (filename.equals("multilingual.docx")) {
             assertTrue(review.scripts().containsAll(List.of("thai", "han", "arabic", "cyrillic", "greek")));

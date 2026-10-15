@@ -23,7 +23,13 @@ import org.xml.sax.helpers.DefaultHandler;
 @Component
 class DocumentInspector {
     record Finding(String code, String severity, String title, String detail) {}
-    record Review(Map<String, Integer> elements, List<Finding> findings, List<String> compilerWarnings, List<String> scripts, String scope) {}
+    record Review(Map<String, Integer> elements, List<Finding> findings, List<String> compilerWarnings, List<String> scripts, String scope,
+                  Integer revision, List<ReviewEvidence.Paragraph> originalText, List<ReviewEvidence.Item> items,
+                  List<ReviewDecisions.Decision> decisions, boolean originalTruncated, String decisionError) {
+        Review(Map<String, Integer> elements, List<Finding> findings, List<String> compilerWarnings, List<String> scripts, String scope) {
+            this(elements, findings, compilerWarnings, scripts, scope, null, List.of(), List.of(), List.of(), false, "");
+        }
+    }
     private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final String M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 

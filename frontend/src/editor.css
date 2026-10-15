@@ -32,6 +32,17 @@
 .compiler-diagnostics a, .compiler-diagnostics summary { text-decoration:underline; cursor:pointer; }
 .compiler-diagnostics pre, .diagnostic-location { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.7 var(--font-mono); }
 .diagnostic-severity { font-weight:600; }.diagnostic-severity.error { color:#8b463b; }.diagnostics-stale { color:#785c30; }
+.ui-review-comparison { min-width:0; max-width:100%; }.ui-review-comparison.has-original { display:grid; grid-template-columns:minmax(160px,.55fr) minmax(0,1fr); gap:12px; align-items:start; }.ui-review-editor { min-width:0; max-width:100%; }
+.original-text-panel { min-width:0; padding:14px; max-height:622px; overflow:auto; border:1px solid #d7dfce; border-radius:9px; background:#fcfdf9; font-size:12px; color:#425638; }
+.original-text-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }.original-text-heading h3 { font-size:13px; font-weight:600; }.original-text-panel h4 { margin-top:20px; font-size:12px; font-weight:600; }
+.original-text-panel p, .guided-review-item p { font-size:12px; line-height:1.7; margin:8px 0; overflow-wrap:anywhere; }
+.original-location { font:10px/1.7 var(--font-mono) !important; color:#65775a; overflow-wrap:anywhere; }
+.original-text-panel blockquote, .guided-review-item blockquote { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.8; padding:12px; margin:12px 0; border-left:2px solid #9bad88; background:#f0f4e8; }
+.original-text-panel summary { cursor:pointer; margin-top:16px; text-decoration:underline; }.original-paragraph { border-top:1px solid #dfe6d6; margin-top:12px; padding-top:8px; }
+.original-text-panel button, .guided-review-actions button { font-size:11px; padding:6px 8px; border:1px solid #b8c6a9; border-radius:4px; background:white; }
+.guided-review-item { padding:16px 0; border-top:1px solid #dce4d3; }.guided-review-item h4 { font-size:13px; font-weight:600; }.guided-review-actions { display:flex; flex-wrap:wrap; gap:6px; }.review-decision-status { font-weight:600; }
+.guided-review-list > p { font-size:12px; line-height:1.7; margin:14px 0; }
+@media (max-width:1199px) { .ui-review-comparison.has-original { grid-template-columns:minmax(0,1fr); }.original-text-panel { max-height:320px; } }
 .latex-editor-tools { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:8px; border-bottom:1px solid #e1e8d8; background:#fafcf6; }
 .latex-editor-tools button { padding:5px 7px; font-size:11px; border:1px solid #d5dfc9; border-radius:4px; color:#486039; background:white; }
 .latex-editor-tools button[aria-pressed=true] { background:#e0eccf; }

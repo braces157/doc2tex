@@ -77,6 +77,31 @@ class ConversionIntegrationTest {
         assertTrue(client().get().uri(base + "/preview/log").retrieve().body(String.class).contains("unfamiliar tool failure"));
     }
 
+    @Test void reviewDecisionRoutePreservesRisksAndRejectsStaleOrInvalidEvidence() throws Exception {
+        assumeTrue(tools.available(tools.pandoc()), "Install Pandoc to run the real review HTTP workflow");
+        byte[] corpus;
+        try (var input = getClass().getResourceAsStream("/corpus/research-complex.docx")) { assertNotNull(input); corpus = input.readAllBytes(); }
+        Job job = await(upload("review-corpus.docx", corpus, "article")); assertEquals("COMPLETED", job.status());
+        String base = "/api/jobs/" + job.id();
+        var review = client().get().uri(base + "/review").retrieve().body(DocumentInspector.Review.class);
+        assertEquals(0, review.revision()); assertFalse(review.items().isEmpty());
+        var finding = review.items().getFirst(); String route = base + "/review/decisions/" + finding.id();
+        String source = client().get().uri(base + "/source").retrieve().body(String.class);
+        var marked = client().put().uri(route).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("revision", 0, "status", "reviewed", "fingerprint", finding.fingerprint())).retrieve().body(DocumentInspector.Review.class);
+        assertEquals(review.findings(), marked.findings()); assertEquals(1, marked.decisions().size()); assertTrue(marked.decisions().getFirst().applicable());
+        assertEquals(source, client().get().uri(base + "/source").retrieve().body(String.class));
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(HttpClientErrorException.class, () -> client().put().uri(route).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("status", "reviewed", "fingerprint", finding.fingerprint())).retrieve().toBodilessEntity()).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(HttpClientErrorException.class, () -> client().put().uri(route).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("revision", 0, "status", "reviewed", "fingerprint", "invalid")).retrieve().toBodilessEntity()).getStatusCode());
+        client().put().uri(base + "/source").contentType(MediaType.APPLICATION_JSON).body(Map.of("revision", 0, "source", source + "\n% unrelated edit\n")).retrieve().toBodilessEntity();
+        assertEquals(HttpStatus.CONFLICT, assertThrows(HttpClientErrorException.class, () -> client().put().uri(route).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("revision", 0, "status", "needs-work", "fingerprint", finding.fingerprint())).retrieve().toBodilessEntity()).getStatusCode());
+        var advanced = client().get().uri(base + "/review").retrieve().body(DocumentInspector.Review.class);
+        assertEquals(1, advanced.revision()); assertEquals(0, advanced.decisions().getFirst().revision()); assertEquals(1, advanced.decisions().getFirst().applicableRevision());
+    }
+
     @Test void libraryRouteReturnsPagesAndRejectsInvalidParameters() throws Exception {
         Job older = new Job(java.util.UUID.randomUUID().toString(), "library-only-résumé.docx", "report",
                 "COMPLETED", "NOT_REQUESTED", "", "", java.time.Instant.EPOCH, java.time.Instant.EPOCH, 20, 0);

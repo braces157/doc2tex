@@ -53,6 +53,12 @@ class ConversionController {
     }
     @GetMapping("/jobs/{id}/review") DocumentInspector.Review review(@PathVariable String id) { return service.review(id); }
 
+    record ReviewDecision(@NotNull @PositiveOrZero Integer revision, @NotBlank String status, @NotBlank String fingerprint) {}
+    @PutMapping("/jobs/{id}/review/decisions/{findingId}")
+    DocumentInspector.Review decide(@PathVariable String id, @PathVariable String findingId, @Valid @RequestBody ReviewDecision decision) throws IOException {
+        return service.decide(id, findingId, decision.revision(), decision.status(), decision.fingerprint());
+    }
+
     @PostMapping(value = "/jobs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     ResponseEntity<Job> create(@RequestPart MultipartFile file, @RequestParam(defaultValue = "article") String template) throws IOException {
         return ResponseEntity.accepted().body(service.submit(file, template));

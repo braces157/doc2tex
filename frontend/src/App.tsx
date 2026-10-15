@@ -24,7 +24,9 @@ export default function App() {
   const [dragging, setDragging] = useState(false)
   const [copied, setCopied] = useState(false)
   const [view, setView] = useState<'source' | 'pdf' | 'review'>('source')
-  const [review, setReview] = useState<ConversionReview | null>(null)
+  const [reviewResult, setReviewResult] = useState<{ key: string; data: ConversionReview | null; error: string } | null>(null)
+  const [reviewAttempt, setReviewAttempt] = useState(0)
+  const [reviewSaving, setReviewSaving] = useState(false)
   const [deletedId, setDeletedId] = useState<string | null>(null)
   const currentId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
@@ -43,6 +45,9 @@ export default function App() {
   const jobId = job?.id
   const jobStatus = job?.status
   const previewStatus = job?.previewStatus
+  const reviewKey = job ? `${job.id}|${job.revision}|${job.previewStatus}|${job.updatedAt}|${reviewAttempt}` : ''
+  const review = reviewResult?.key === reviewKey ? reviewResult.data : null
+  const reviewError = reviewResult?.key === reviewKey ? reviewResult.error : ''
   const { confirmDiscard, dialog } = useDiscardConfirmation(dirty)
   const noteMissing = useCallback((id: string, error: unknown) => {
     if (!isMissingDocument(error)) return
@@ -138,9 +143,10 @@ export default function App() {
     if (!jobId || jobStatus !== 'COMPLETED') return
     const controller = new AbortController()
     void api<ConversionReview>(`/jobs/${jobId}/review`, { signal: controller.signal })
-      .then(setReview).catch((error: Error) => { if (error.name !== 'AbortError') setError(error.message) })
+      .then(data => { if (!controller.signal.aborted) setReviewResult({ key: reviewKey, data, error: '' }) })
+      .catch((error: Error) => { if (!controller.signal.aborted) setReviewResult({ key: reviewKey, data: null, error: error.message }) })
     return () => controller.abort()
-  }, [jobId, jobStatus, previewStatus])
+  }, [jobId, jobStatus, reviewKey])
 
   const discardChanges = async () => {
     if (!(await confirmDiscard())) return false
@@ -166,7 +172,7 @@ export default function App() {
       navigationVersion.current++
       currentId.current = next.id
       rememberJob(next.id)
-      setJob(next); setReview(null); setView('source')
+      setJob(next); setReviewResult(null); setView('source')
       setHistory(previous => [next, ...previous.filter(item => item.id !== next.id)])
     } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed. Try again.') }
     finally { setBusy(false) }
@@ -177,7 +183,7 @@ export default function App() {
     navigationVersion.current++
     currentId.current = next.id
     rememberJob(next.id)
-    setReview(null)
+    setReviewResult(null)
     setJob(next); setFile(null); setTemplate(next.template); setError(''); setView('source')
   }
 
@@ -186,7 +192,7 @@ export default function App() {
     navigationVersion.current++
     currentId.current = null
     rememberJob(null)
-    setReview(null)
+    setReviewResult(null)
     setJob(null); setFile(null); setError(''); setView('source')
   }
 
@@ -276,11 +282,25 @@ export default function App() {
     setHistory(previous => previous.filter(item => item.id !== removed.id))
     if (currentId.current === removed.id) {
       currentId.current = null; rememberJob(null)
-      setJob(null); setFile(null); setReview(null); setView('source'); setError('')
+      setJob(null); setFile(null); setReviewResult(null); setView('source'); setError('')
     }
   }
 
   const readyForActions = completed && !missingDocument && sourceDocument.ready && !sourceDocument.recovery && !busy && Boolean(source.trim())
+  const decideFinding = async (findingId: string, status: 'reviewed' | 'needs-work' | 'unreviewed') => {
+    if (!job || !readyForActions || dirty || saving || compiling || reviewSaving || review?.revision !== job.revision || review.decisionError) return
+    const item = review.items?.find(item => item.id === findingId)
+    if (!item) return
+    const id = job.id, navigation = navigationVersion.current, key = reviewKey
+    setReviewSaving(true)
+    try {
+      const data = await api<ConversionReview>(`/jobs/${id}/review/decisions/${findingId}`, { method: 'PUT',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: job.revision, status, fingerprint: item.fingerprint }) })
+      if (currentId.current === id && navigationVersion.current === navigation) setReviewResult({ key, data, error: '' })
+    } catch (error) {
+      if (currentId.current === id && navigationVersion.current === navigation) setReviewResult({ key, data: review, error: error instanceof Error ? error.message : 'Could not save the review decision.' })
+    } finally { setReviewSaving(false) }
+  }
   const revealDiagnostic = useEffectEvent((id: string, line: number, revision: number) => {
     if (currentId.current !== id || job?.revision !== revision || dirty || !readyForActions || saving || compiling) return
     editorRef.current?.goToLine(line)
@@ -335,6 +355,7 @@ export default function App() {
       restoreVersion,
       editorRef, commandKey,
       navigateSource,
+      reviewSaving, reviewError, retryReview: () => setReviewAttempt(value => value + 1), decideFinding,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
       selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),
