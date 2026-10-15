@@ -32,8 +32,9 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64)
     pandoc_asset=linux-amd64.tar.gz
     pandoc_hash=d0c90410e90204c9ca83b8539fac5c7aed01fd537207e4585849f8abc5df20b8
-    tectonic_asset=x86_64-unknown-linux-musl.tar.gz
-    tectonic_hash=8533d07f9ccbd7a65824b9e0459041bca34af1eb33daba48f59215593753a3b7 ;;
+    # The musl build cannot initialize the ICU line-break data used by our Thai/CJK export.
+    tectonic_asset=x86_64-unknown-linux-gnu.tar.gz
+    tectonic_hash=1a715688baf591e650c8aeb160ae934e181685eecbb38b317de30b269ac5d606 ;;
   Darwin-arm64)
     pandoc_asset=arm64-macOS.zip
     pandoc_hash=c2146cf33a583f3ac93eccddf1bb662371d5cfcce1aad1c87ad860cca1435d46
