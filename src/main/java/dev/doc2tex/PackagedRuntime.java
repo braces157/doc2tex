@@ -25,8 +25,8 @@ class PackagedRuntime {
     static synchronized void acquire() throws IOException {
         String configured = System.getProperty("doc2tex.home", "");
         if (configured.isBlank()) return;
-        home = Path.of(configured).toAbsolutePath().normalize(); JobStore.checkUnlinked(home); Files.createDirectories(home);
-        Path file = home.resolve(".instance.lock"); JobStore.checkUnlinked(file);
+        home = Path.of(configured).toAbsolutePath().normalize(); checkStartupPath(home); Files.createDirectories(home);
+        Path file = home.resolve(".instance.lock"); checkStartupPath(file);
         channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         lock = channel.tryLock();
         if (lock == null) { channel.close(); throw new IOException("doc2TeX is already running for this data folder. Use Launch doc2TeX.cmd to reopen it."); }
@@ -34,6 +34,10 @@ class PackagedRuntime {
     }
 
     static boolean packaged() { return home != null; }
+    static void checkStartupPath(Path path) throws IOException {
+        try { JobStore.checkUnlinked(path); }
+        catch (ApiException exception) { throw new IOException("Packaged startup refused a linked or unverifiable data path. Choose a normal local DOC2TEX_HOME and retry.", exception); }
+    }
     static String id() { return packaged() ? ID : ""; }
     static boolean authorized(String token) {
         return packaged() && token != null && java.security.MessageDigest.isEqual(TOKEN.getBytes(java.nio.charset.StandardCharsets.UTF_8), token.getBytes(java.nio.charset.StandardCharsets.UTF_8));

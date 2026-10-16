@@ -61,4 +61,18 @@ class SetupDiagnosticsTest {
         assertTrue(PreviewFailure.message("error: main.tex:5: Undefined control sequence").contains("edit the source"));
         assertFalse(PreviewFailure.message("error: main.tex:5: Undefined control sequence").contains("download/cache"));
     }
+
+    @Test void linkedPackagedStorageHasAStartupErrorAndLeavesTheTargetUntouched() throws Exception {
+        Path target = storage.resolve("external-synthetic-target"), link = storage.resolve("linked-home"); Files.createDirectories(target);
+        Files.writeString(target.resolve("sentinel.txt"), "Synthetic target unchanged");
+        if (System.getProperty("os.name").startsWith("Windows")) {
+            Process process = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), target.toString()).redirectErrorStream(true).start();
+            assertTrue(process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)); assertEquals(0, process.exitValue());
+        } else Files.createSymbolicLink(link, target);
+        try {
+            var error = assertThrows(java.io.IOException.class, () -> PackagedRuntime.checkStartupPath(link));
+            assertTrue(error.getMessage().contains("Packaged startup refused")); assertInstanceOf(ApiException.class, error.getCause());
+            assertEquals("Synthetic target unchanged", Files.readString(target.resolve("sentinel.txt")));
+        } finally { Files.delete(link); }
+    }
 }

@@ -23,6 +23,10 @@ test('setup distinguishes tools, fonts and PDF downloads and retries without los
   await expect(editor).toHaveText(source, { useInnerText: true })
   const draft = source.replace('Synthetic saved source.', 'Synthetic unsaved source to retain.')
   await editor.fill(draft)
+  if (testInfo.project.name === 'desktop') {
+    await page.getByRole('button', { name: 'Setup diagnostics', exact: true }).hover()
+    await expect(page.getByRole('tooltip')).toContainText('Open Setup diagnostics to install or repair')
+  }
   await page.getByRole('button', { name: 'Setup diagnostics', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Setup diagnostics', exact: true })
   await expect(dialog).toContainText('Pandoc · missing'); await expect(dialog).toContainText('Tectonic · unusable')
