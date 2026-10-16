@@ -203,7 +203,7 @@ class ConversionService {
         Job job = ready(id);
         if (List.of("QUEUED", "COMPILING", "READY").contains(job.previewStatus())) return job;
         if (!tools.available(tools.tectonic())) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
-                "PDF preview needs Tectonic. Run scripts/setup-tools.ps1, then restart the app.");
+                "PDF preview needs Tectonic. Close the app and run Install tools.cmd in the Windows package, or scripts/setup-tools.ps1 in a development checkout, then relaunch. Source and ZIP export remain available.");
         Path diagnostics = store.directory(id).resolve("compiler-diagnostics.json");
         JobStore.checkUnlinked(diagnostics);
         Files.deleteIfExists(diagnostics);
@@ -238,7 +238,7 @@ class ConversionService {
             ToolRunner.Result result = runner.run(List.of(tools.tectonic(), "--untrusted", "--color", "never", "--outdir", preview.toString(),
                     "main.tex"), output, directory.resolve("preview.log"), properties.previewTimeoutSeconds());
             if (result.exitCode() != 0 || !Files.isRegularFile(preview.resolve("main.pdf")))
-                throw new IOException("PDF compilation failed. Check the compiler log, edit the source, and try again.");
+                throw new IOException(PreviewFailure.message(result.log()));
             var diagnostics = CompilerDiagnostics.fromLog(compilerLog, job.revision(), "READY", null);
             CompilerDiagnostics.save(directory, diagnostics);
             boolean warnings = !diagnostics.items().isEmpty() || diagnostics.logTruncated();

@@ -1,6 +1,9 @@
+param([string]$FontsDirectory)
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Global -Force
 $taskRoot = Split-Path -Parent $PSScriptRoot
-$taskFonts = Join-Path $taskRoot '.tools/fonts'
+$taskFonts = if ($FontsDirectory) { [IO.Path]::GetFullPath($FontsDirectory) } else { Join-Path $taskRoot '.tools/fonts' }
 New-Item -ItemType Directory -Path $taskFonts -Force | Out-Null
 $taskNoto = 'https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac'
 $taskCjk = 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c'
@@ -16,7 +19,7 @@ foreach ($taskAsset in $taskAssets) {
     $taskTarget = Join-Path $taskFonts $taskAsset.name
     if ((Test-Path -LiteralPath $taskTarget) -and (Get-FileHash -LiteralPath $taskTarget -Algorithm SHA256).Hash -eq $taskAsset.hash) { continue }
     Write-Host "Downloading $($taskAsset.name)..."
-    Invoke-WebRequest -Uri $taskAsset.url -OutFile $taskTarget
+    Invoke-WebRequest -Uri $taskAsset.url -OutFile $taskTarget -TimeoutSec 120
     if ((Get-FileHash -LiteralPath $taskTarget -Algorithm SHA256).Hash -ne $taskAsset.hash) { throw "Font checksum failed: $($taskAsset.name)" }
 }
 Write-Host 'Multilingual fonts ready. Font licenses are included in multilingual exports.'

@@ -1,7 +1,10 @@
-param([switch]$SkipPreview, [switch]$SkipFonts)
+param([switch]$SkipPreview, [switch]$SkipFonts, [string]$ToolsDirectory)
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -Global -Force
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psd1') -Global -Force
 $taskRoot = Split-Path -Parent $PSScriptRoot
-$taskTools = Join-Path $taskRoot '.tools'
+$taskTools = if ($ToolsDirectory) { [IO.Path]::GetFullPath($ToolsDirectory) } else { Join-Path $taskRoot '.tools' }
 New-Item -ItemType Directory -Force -Path $taskTools | Out-Null
 
 function Install-ProjectTool {
@@ -11,7 +14,7 @@ function Install-ProjectTool {
     if (Test-Path -LiteralPath $taskExecutable) { Write-Host "$Name is already installed."; return }
     $taskArchive = Join-Path $taskTools "$Name.zip"
     Write-Host "Downloading $Name into .tools..."
-    Invoke-WebRequest -Uri $Url -OutFile $taskArchive
+    Invoke-WebRequest -Uri $Url -OutFile $taskArchive -TimeoutSec 120
     $taskHash = (Get-FileHash -LiteralPath $taskArchive -Algorithm SHA256).Hash
     if ($taskHash -ne $Sha256) { throw "Checksum verification failed for $Name." }
     Expand-Archive -LiteralPath $taskArchive -DestinationPath $taskDestination -Force
@@ -27,4 +30,4 @@ if (-not $SkipPreview) {
     Install-ProjectTool -Name 'tectonic' -Url 'https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-pc-windows-msvc.zip' -Sha256 'f61ce51f0b0ade1015b7de7ef368541c5424e9756ecbd0d7af97d6d48030845f'
 }
 Write-Host 'Tools ready. Start the backend from the project root.'
-if (-not $SkipFonts) { & (Join-Path $PSScriptRoot 'setup-fonts.ps1') }
+if (-not $SkipFonts) { & (Join-Path $PSScriptRoot 'setup-fonts.ps1') -FontsDirectory (Join-Path $taskTools 'fonts') }

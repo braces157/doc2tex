@@ -421,7 +421,7 @@ export default function App() {
   }, [])
 
   return <>
-    <WorkspaceView model={{ system, history, job, file, template, layout, setLayout, copyLayout, source, sourceLoading, error, saving,
+    <WorkspaceView model={{ system, setSystem, history, job, file, template, layout, setLayout, copyLayout, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
       sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
       recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,
