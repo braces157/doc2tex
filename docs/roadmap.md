@@ -320,4 +320,4 @@ Update the status and evidence link after each implementation; the roadmap's exi
 | R07 | Merged | [PR #19](https://github.com/braces157/doc2tex/pull/19), [design and verification](roadmap-r07.md) |
 | R08 | Merged | [PR #21](https://github.com/braces157/doc2tex/pull/21), [design and verification](roadmap-r08.md) |
 | R09 | Merged | [PR #23](https://github.com/braces157/doc2tex/pull/23), [design and verification](roadmap-r09.md) |
-| R10 | Implemented; PR review, CI and clean-VM acceptance pending | [PR #25](https://github.com/braces157/doc2tex/pull/25), [design and verification](roadmap-r10.md) |
+| R10 | Implemented; clean-VM acceptance pending | [PR #25](https://github.com/braces157/doc2tex/pull/25), [review/CI evidence and remaining verification](roadmap-r10.md) |
