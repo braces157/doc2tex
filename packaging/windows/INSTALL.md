@@ -30,7 +30,7 @@ Uninstall means stopping the app and deleting the extracted app folder. This **r
 
 ## Recovery
 
-- Missing/unusable converter or font: stop the app, rerun Install tools.cmd, then relaunch and open **Setup diagnostics**. For a partially failed download, reconnect and rerun; do not delete project storage.
+- Missing/unusable converter or font: stop the app, rerun Install tools.cmd, then relaunch and open **Setup diagnostics**. This re-extracts checksum-verified converters even when a broken executable already exists; fonts are checked/replaced by checksum. For a partially failed download, reconnect and rerun; do not delete project storage. Development checkouts can use `scripts/setup-tools.ps1 -Repair`.
 - Port busy: stop the existing app using its app/data folder. If another program owns the port, choose a free integer 1024–65535 in `settings.json` while stopped. A changed browser origin has separate drafts; preserve unsaved text first.
 - Startup failure: inspect `logs/startup.log` and `logs/startup-error.log`. Never delete `.instance.lock` while a server is running; a stale instance JSON file is verified against the live API rather than trusted by PID alone.
 - PDF network/cache failure: reconnect/check proxy, retry Build PDF, then inspect the compiler log if needed. A genuine TeX error requires editing the saved source. Neither failure removes source or ZIP exports.

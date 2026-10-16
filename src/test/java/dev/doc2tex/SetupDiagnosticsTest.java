@@ -49,6 +49,8 @@ class SetupDiagnosticsTest {
         var partial = new Tools(properties, fonts, (name, executable) -> new Tools.Diagnostic(name, "ready", "", "")).status();
         assertEquals(5, ((List<?>) partial.get("missingFonts")).size());
         assertEquals("missing", Tools.inspect("Missing tool", storage.resolve("nonexistent.exe").toString()).state());
+        Path broken = storage.resolve("broken-tool.exe"); Files.writeString(broken, "Synthetic damaged executable");
+        assertEquals("unusable", Tools.inspect("Broken tool", broken.toString()).state());
         assertEquals("ready", Tools.inspect("Java", ProcessHandle.current().info().command().orElseThrow()).state());
     }
 

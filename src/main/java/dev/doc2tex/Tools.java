@@ -68,7 +68,9 @@ class Tools {
             String version = output.get(1, TimeUnit.SECONDS).lines().findFirst().orElse("").replaceAll("[\\p{Cntrl}]", "");
             return new Diagnostic(name, "ready", version.substring(0, Math.min(version.length(), 200)), name + " is ready.");
         } catch (IOException exception) {
-            return new Diagnostic(name, "missing", "", name + " could not be started. Close the app and run Install tools.cmd in the Windows package, or scripts/setup-tools.ps1 for a development checkout. Then relaunch.");
+            boolean present;
+            try { present = Files.isRegularFile(Path.of(executable)); } catch (RuntimeException ignored) { present = false; }
+            return new Diagnostic(name, present ? "unusable" : "missing", "", name + " could not be started. Close the app and run Install tools.cmd in the Windows package, or scripts/setup-tools.ps1 -Repair for a development checkout. Then relaunch.");
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt(); return new Diagnostic(name, "unusable", "", "Tool checking was interrupted. Retry setup diagnostics.");
         } catch (Exception exception) {

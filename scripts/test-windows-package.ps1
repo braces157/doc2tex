@@ -82,6 +82,10 @@ try {
     try { Assert-That ([int]$taskForbidden.StatusCode -eq 403) 'Unauthenticated shutdown must be rejected.' } finally { $taskForbidden.Dispose() }
     Run-Helper 'Stop.ps1'; Assert-That ($LASTEXITCODE -eq 0) 'Initial stop failed.'
     if ($DownloadTools) {
+        # An existing damaged executable must be repaired rather than skipped.
+        $taskBrokenTool = Join-Path $taskHome '.tools/pandoc/pandoc.exe'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $taskBrokenTool) | Out-Null
+        [IO.File]::WriteAllText($taskBrokenTool, 'Synthetic damaged executable')
         Run-Helper 'Install-Tools.ps1' @('-AcceptDownloads')
         Assert-That ($LASTEXITCODE -eq 0) 'Explicit tool installation failed.'
     } else { Copy-Item -LiteralPath (Join-Path $taskRoot '.tools') -Destination (Join-Path $taskHome '.tools') -Recurse }
