@@ -1,6 +1,6 @@
 # R10 Windows packaging and setup diagnostics
 
-Started 16 October 2026 (Asia/Bangkok), after R09 merged in [PR #23](https://github.com/braces157/doc2tex/pull/23). [Issue #24](https://github.com/braces157/doc2tex/issues/24) tracks implementation. R09 final-head Windows/Linux CI passed 116 browser and 109 backend/PDF tests with no skipped tests; CodeRabbit reported no actionable findings.
+Started 16 October 2026 (Asia/Bangkok), after R09 merged in [PR #23](https://github.com/braces157/doc2tex/pull/23). [Issue #24](https://github.com/braces157/doc2tex/issues/24) and [PR #25](https://github.com/braces157/doc2tex/pull/25) track implementation. R09 final-head Windows/Linux CI passed 116 browser and 109 backend/PDF tests with no skipped tests; CodeRabbit reported no actionable findings.
 
 ## Packaging choice and redistribution
 
@@ -15,6 +15,7 @@ Use an x64 Windows portable ZIP containing the built frontend/application JAR, u
 - Diagnostics preserve existing system booleans while distinguishing missing/unusable tools, readable font/license presence and first-build TeX download guidance. Tool checks are bounded, capture only a short version line and perform no network installation. The lazy UI supports retries without touching source.
 - The pinned compiler reproduces an offline uncached-bundle failure (`target/r10-offline-probe/compile.log`). Network/cache build failures receive connection/proxy/retry guidance; ordinary TeX failures retain source-editing guidance. Both keep source and exports available. Cache completeness and fully offline installation are not claimed.
 - Explicit tool repair re-extracts a verified archive in a fresh staging folder, so a damaged existing executable is replaced rather than selected/skipped again. Package installation always uses repair mode; development setup exposes `-Repair`. A synthetic damaged Pandoc fixture is repaired during the packaged verification workflow. Bounded tool checks distinguish absent files from existing executables that cannot run.
+- Windows CI exposed a version-check broken-pipe race: piping a running converter into `Select-Object -First 1` could cause its nonzero exit after otherwise valid output. Setup now captures the complete trusted version response/exit code before displaying its first line.
 - Upgrade instructions stop/back up first, extract into a separate app folder and retain external data/settings. Uninstall removes only the extracted app folder; data and browser drafts are retained unless the user separately removes them. No automatic updater, project migration or data-deletion script was introduced.
 
 ## Verification and release gate

@@ -30,8 +30,10 @@ function Install-ProjectTool {
     # Only this fresh, checked staging directory is recursively removed.
     Remove-Item -LiteralPath $taskStage -Recurse -Force
     Remove-Item -LiteralPath $taskArchive
-    & $taskExecutable --version | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0) { throw "$Name was installed but could not run. Inspect setup diagnostics and the upstream Windows requirements." }
+    $taskVersionOutput = & $taskExecutable --version 2>&1
+    $taskVersionExit = $LASTEXITCODE
+    if ($taskVersionExit -ne 0) { throw "$Name was installed but could not run. Inspect setup diagnostics and the upstream Windows requirements." }
+    $taskVersionOutput | Select-Object -First 1
 }
 
 Install-ProjectTool -Name 'pandoc' -Url 'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip' -Sha256 '6ef431cb20b2c24a0371fc19200dc49d452be54b1b5c9239f3462841ef53e587'
