@@ -28,11 +28,13 @@ export default function App() {
   const [reviewResult, setReviewResult] = useState<{ key: string; data: ConversionReview | null; error: string } | null>(null)
   const [reviewAttempt, setReviewAttempt] = useState(0)
   const [reviewSaving, setReviewSaving] = useState(false)
+  const [bibliographySaving, setBibliographySaving] = useState(false)
   const [deletedId, setDeletedId] = useState<string | null>(null)
   const currentId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
   const editorRef = useRef<LatexEditorHandle>(null)
   const [diagnosticTarget, setDiagnosticTarget] = useState<{ id: string; line: number; revision: number } | null>(null)
+  const [citationTarget, setCitationTarget] = useState<{ id: string; key: string; revision: number } | null>(null)
   const composition = useRef({ active: false, endedAt: 0 })
   const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -311,6 +313,25 @@ export default function App() {
     finally { setSaving(false) }
   }
 
+  const updateBibliography = async (run: (job: Job) => Promise<{ job: Job; source: string }>) => {
+    if (!job || missingDocument || !sourceDocument.ready || sourceDocument.recovery || dirty || saving || compiling || busy || editorRef.current?.isComposing()) return false
+    setSaving(true); setBibliographySaving(true); setError('')
+    try {
+      const result = await run(job)
+      if (currentId.current !== result.job.id) return false
+      setJob(result.job); sourceDocument.markSaved(result.job, result.source)
+      setHistory(previous => previous.map(item => item.id === result.job.id ? result.job : item))
+      toast.success(`Bibliography changes saved as version ${result.job.revision}`); return true
+    } catch (error) { noteMissing(job.id, error); throw error }
+    finally { setSaving(false); setBibliographySaving(false) }
+  }
+  const importBibliography = (file: File) => updateBibliography(job => {
+    const body = new FormData(); body.append('file', file); body.append('revision', String(job.revision))
+    return api<{ job: Job; source: string }>(`/jobs/${job.id}/bibliography`, { method: 'POST', body })
+  })
+  const setupBibliography = (revision: number, sourceHash: string) => updateBibliography(job =>
+    api<{ job: Job; source: string }>(`/jobs/${job.id}/bibliography/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, sourceHash }) }))
+
   const deleted = (removed: Job) => {
     // This callback runs only after the server confirms all job-owned files are gone.
     try { clearJobDrafts(removed.id) }
@@ -349,6 +370,21 @@ export default function App() {
     setDiagnosticTarget({ id: job.id, line, revision })
     setView('source')
   }
+  const revealCitation = useEffectEvent((id: string, key: string, revision: number) => {
+    if (currentId.current !== id || job?.revision !== revision || !readyForActions || saving || compiling || !/^[A-Za-z0-9_][A-Za-z0-9:._+-]{0,127}$/.test(key)) {
+      toast.error('Citation was not inserted. Wait for the document to finish updating, then try again.'); return
+    }
+    if (composition.current.active || !editorRef.current?.insertText(`\\cite{${key}}`)) toast.error('Citation was not inserted. Finish text composition and wait for the source editor, then try again.')
+  })
+  const insertCitation = (key: string, revision: number) => {
+    if (!job || job.revision !== revision || !readyForActions || saving || compiling) return
+    setCitationTarget({ id: job.id, key, revision }); setView('source')
+  }
+  useEffect(() => {
+    if (!citationTarget || view !== 'source') return
+    const frame = requestAnimationFrame(() => { revealCitation(citationTarget.id, citationTarget.key, citationTarget.revision); setCitationTarget(current => current === citationTarget ? null : current) })
+    return () => cancelAnimationFrame(frame)
+  }, [citationTarget, view])
   useEffect(() => {
     if (!diagnosticTarget || view !== 'source') return
     const frame = requestAnimationFrame(() => {
@@ -396,6 +432,7 @@ export default function App() {
       navigateSource,
       reviewSaving, reviewError, retryReview: () => setReviewAttempt(value => value + 1), decideFinding,
       applyCaptionRepairs,
+      bibliographySaving, importBibliography, setupBibliography, insertCitation,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
       selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),

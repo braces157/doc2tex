@@ -299,6 +299,13 @@ class ConversionService {
             store.requireHistory(id);
             source = new String(store.versions().current(job, directory), StandardCharsets.UTF_8);
         } catch (IOException | RuntimeException ignored) { /* Original text remains useful when saved source/history is unavailable. */ }
+        if (source != null) try {
+            if (store.versions().bibliography(job, directory, job.revision()) != null) {
+                var bibliography = bibliographyReport(job, directory, source); var notes = new ArrayList<>(bibliography.warnings());
+                if (!bibliography.unknownKeys().isEmpty()) notes.add("Unknown citation keys: " + String.join(", ", bibliography.unknownKeys().stream().limit(8).toList()) + ". Import matching entries or correct source keys.");
+                if (!notes.isEmpty()) findings.add(new DocumentInspector.Finding("bibliography", "warning", "Bibliography needs review", String.join(" ", notes.stream().limit(8).toList())));
+            }
+        } catch (IOException | RuntimeException exception) { findings.add(new DocumentInspector.Finding("bibliography", "warning", "Bibliography needs review", "Bibliography metadata could not be verified. Back up project storage before repairing its saved assets.")); }
         var evidence = ReviewEvidence.inspect(directory.resolve("input.docx"), source, job.revision());
         List<ReviewDecisions.Decision> decisions = List.of(); String decisionError = "";
         try { decisions = ReviewDecisions.apply(ReviewDecisions.load(directory), evidence.items(), job.revision()); }
@@ -346,6 +353,81 @@ class ConversionService {
             String repaired = CaptionRepairs.apply(source, revision, sourceHash, proposalIds, WordReferenceSupport.warnings(directory.resolve("input.docx"), directory.resolve("output")));
             return new RestoredDocument(saveSourceLocked(id, repaired, revision), repaired);
         }
+    }
+
+    record BibliographyReport(int revision, String filename, long bytes, String sha256, List<BibtexLibrary.Entry> entries, List<String> unknownKeys, List<String> warnings) {}
+
+    BibliographyReport bibliography(String id) throws IOException {
+        try (var operation = store.read(id)) {
+            Job job = ready(id); Path directory = store.directory(id);
+            return bibliographyReport(job, directory, source(id));
+        }
+    }
+
+    private BibliographyReport bibliographyReport(Job job, Path directory, String source) throws IOException {
+        var assets = store.versions().bibliography(job, directory, job.revision());
+        var parsed = assets == null ? new BibtexLibrary.Parsed(List.of(), List.of()) : BibtexLibrary.parse(assets.bibliography());
+        var keys = parsed.entries().stream().map(BibtexLibrary.Entry::key).collect(java.util.stream.Collectors.toSet());
+        var inspection = LatexBibliography.inspect(source, keys); var warnings = new java.util.LinkedHashSet<>(parsed.warnings()); warnings.addAll(inspection.warnings());
+        if (assets != null) {
+            var scripts = new java.util.LinkedHashSet<String>(); DocumentInspector.detectScripts(new String(assets.bibliography(), StandardCharsets.UTF_8), scripts);
+            scripts.removeAll(List.of("greek", "cyrillic"));
+            if (!scripts.isEmpty()) warnings.add("Check bibliography fonts/reading direction for " + String.join(", ", scripts) + ". The bundled bibliography font supports Latin, Greek and Cyrillic; other scripts require manual font settings.");
+            if (assets.font() == null) warnings.add("The bundled bibliography font is unavailable. Install project fonts or verify your current source fonts before building.");
+        }
+        return new BibliographyReport(job.revision(), assets == null ? "" : assets.filename(), assets == null ? 0 : assets.bibliography().length,
+                assets == null ? "" : SourceVersionStore.digest(assets.bibliography()), parsed.entries(), inspection.unknownKeys(), warnings.stream().limit(32).toList());
+    }
+
+    RestoredDocument importBibliography(String id, int revision, MultipartFile file) throws IOException {
+        if (file.isEmpty() || file.getSize() > BibliographyAssets.MAX_BIB) throw bad("Choose a non-empty .bib file up to 1 MiB.");
+        String filename = cleanFilename(file.getOriginalFilename()); if (!filename.toLowerCase(Locale.ROOT).endsWith(".bib")) throw bad("Choose a UTF-8 .bib file.");
+        byte[] bytes; try (var input = file.getInputStream()) { bytes = input.readNBytes(BibliographyAssets.MAX_BIB + 1); }
+        BibtexLibrary.parse(bytes);
+        try (var operation = store.edit(id)) {
+            Job job = ready(id); requireBibliographyMutation(job, revision); Path directory = store.directory(id);
+            String source = new String(store.versions().current(job, directory), StandardCharsets.UTF_8);
+            var assets = BibliographyAssets.replace(filename, bytes, store.versions().bibliography(job, directory, job.revision()));
+            Job next = store.versions().commit(job, directory, source, -1, store::save, assets);
+            return new RestoredDocument(next, source);
+        }
+    }
+
+    private void requireBibliographyMutation(Job job, int revision) {
+        if (revision < 0) throw bad("Provide the expected saved source revision.");
+        if (job.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source or bibliography changed. Reopen this document before importing or setting up bibliography assets.");
+        if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) throw new ApiException(HttpStatus.CONFLICT, "Wait for PDF compilation before changing bibliography assets.");
+    }
+
+    LatexBibliography.Plan bibliographySetup(String id) throws IOException {
+        try (var operation = store.read(id)) {
+            Job job = ready(id); Path directory = store.directory(id);
+            return LatexBibliography.plan(source(id), job.revision(), store.versions().bibliography(job, directory, job.revision()));
+        }
+    }
+
+    RestoredDocument applyBibliographySetup(String id, int revision, String hash) throws IOException {
+        try (var operation = store.edit(id)) {
+            Job job = ready(id); requireBibliographyMutation(job, revision); Path directory = store.directory(id);
+            String source = new String(store.versions().current(job, directory), StandardCharsets.UTF_8);
+            String prepared = LatexBibliography.apply(source, revision, hash, store.versions().bibliography(job, directory, revision));
+            return new RestoredDocument(saveSourceLocked(id, prepared, revision), prepared);
+        }
+    }
+
+    void writeBibliography(String id, Integer revision, OutputStream output) throws IOException {
+        try (var operation = store.read(id)) {
+            output.write(requiredBibliography(id, revision).bibliography());
+        }
+    }
+
+    void requireBibliography(String id, Integer revision) throws IOException {
+        try (var operation = store.read(id)) { requiredBibliography(id, revision); }
+    }
+    private BibliographyAssets requiredBibliography(String id, Integer revision) throws IOException {
+        Job job = ready(id); var assets = store.versions().bibliography(job, store.directory(id), revision == null ? job.revision() : revision);
+        if (assets == null) throw new ApiException(HttpStatus.NOT_FOUND, "This saved version has no attached bibliography.");
+        return assets;
     }
 
     Path pdf(String id) {
@@ -412,10 +494,24 @@ class ConversionService {
             zip.putNextEntry(new ZipEntry("layout-settings.json"));
             zip.write(JsonMapper.builder().build().writeValueAsBytes(job.layout()));
             zip.closeEntry();
+            var bibliography = store.versions().bibliography(job, store.directory(id), job.revision());
+            if (bibliography != null) for (var entry : bibliography.files().entrySet()) {
+                zip.putNextEntry(new ZipEntry(BibliographyAssets.FOLDER + "/" + entry.getKey())); zip.write(entry.getValue()); zip.closeEntry();
+            }
+            Path readme = output.resolve("README.txt"); JobStore.checkUnlinked(readme);
+            zip.putNextEntry(new ZipEntry("README.txt"));
+            if (Files.isRegularFile(readme)) Files.copy(readme, zip); else zip.write("Exported with doc2TeX. Keep project folders beside main.tex.\n".getBytes(StandardCharsets.UTF_8));
+            if (bibliography != null) {
+                String instructions = "\nBibliography: uploaded UTF-8 bytes are preserved as bibliography/references.bib.\n"
+                    + "Tectonic runs BibTeX automatically: tectonic main.tex\n"
+                    + "For a TeX distribution/Overleaf, use XeLaTeX + BibTeX: xelatex main.tex; bibtex main; xelatex main.tex; xelatex main.tex\n"
+                    + "Keep the bibliography folder, bundled Noto font and OFL license with the source. This export uses this saved revision's bibliography assets.\n";
+                zip.write(instructions.getBytes(StandardCharsets.UTF_8));
+            }
+            zip.closeEntry();
             for (Path file : paths.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).sorted().toList()) {
                 String name = output.relativize(file).toString().replace('\\', '/');
-                if (name.equals("main.tex")) continue;
-                if (!(name.equals("main.tex") || name.equals("README.txt") || name.startsWith("media/") || name.startsWith("fonts/"))) continue;
+                if (!(name.startsWith("media/") || name.startsWith("fonts/"))) continue;
                 zip.putNextEntry(new ZipEntry(name));
                 Files.copy(file, zip);
                 zip.closeEntry();
