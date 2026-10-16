@@ -82,12 +82,24 @@ try {
     try { Assert-That ([int]$taskForbidden.StatusCode -eq 403) 'Unauthenticated shutdown must be rejected.' } finally { $taskForbidden.Dispose() }
     Run-Helper 'Stop.ps1'; Assert-That ($LASTEXITCODE -eq 0) 'Initial stop failed.'
     if ($DownloadTools) {
+        $taskSetupScript = Join-Path $taskInstall 'scripts/setup-tools.ps1'
+        $taskOriginalSetup = [IO.File]::ReadAllBytes($taskSetupScript)
+        $taskFailureObserved = $false
+        try {
+            [IO.File]::WriteAllText($taskSetupScript, 'exit 7')
+            try { Run-Helper 'Install-Tools.ps1' @('-AcceptDownloads') } catch { $taskFailureObserved = $true }
+            Assert-That $taskFailureObserved 'A failed setup was reported as success.'
+            $taskFailedOutput = Join-Path $taskEvidence ("helper-$($script:taskHelperCount)-Install-Tools.ps1.log")
+            Assert-That (-not [IO.File]::ReadAllText($taskFailedOutput).Contains('Launch doc2TeX.cmd again')) 'Failed setup printed success guidance.'
+        } finally { [IO.File]::WriteAllBytes($taskSetupScript, $taskOriginalSetup) }
         # An existing damaged executable must be repaired rather than skipped.
         $taskBrokenTool = Join-Path $taskHome '.tools/pandoc/pandoc.exe'
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $taskBrokenTool) | Out-Null
         [IO.File]::WriteAllText($taskBrokenTool, 'Synthetic damaged executable')
+        [IO.File]::WriteAllText((Join-Path (Split-Path -Parent $taskBrokenTool) 'stale-tool-file.txt'), 'Synthetic stale file to retain outside the active installation')
         Run-Helper 'Install-Tools.ps1' @('-AcceptDownloads')
         Assert-That ($LASTEXITCODE -eq 0) 'Explicit tool installation failed.'
+        Assert-That (-not (Test-Path -LiteralPath (Join-Path $taskHome '.tools/pandoc/stale-tool-file.txt'))) 'Repair retained stale files in the active tool directory.'
     } else { Copy-Item -LiteralPath (Join-Path $taskRoot '.tools') -Destination (Join-Path $taskHome '.tools') -Recurse }
     Run-Helper 'Launch.ps1' @('-NoBrowser'); Assert-That ($LASTEXITCODE -eq 0) 'Ready packaged launch failed.'
     $taskStatus = Api GET '/system'; Assert-That ($taskStatus.pandoc -and $taskStatus.tectonic -and $taskStatus.missingFonts.Count -eq 0) 'Installed tool/font diagnostics did not become ready.'

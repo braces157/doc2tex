@@ -18,22 +18,43 @@ function Install-ProjectTool {
     $taskHash = (Get-FileHash -LiteralPath $taskArchive -Algorithm SHA256).Hash
     if ($taskHash -ne $Sha256) { throw "Checksum verification failed for $Name." }
     $taskStage = [IO.Path]::GetFullPath((Join-Path $taskTools ('.' + $Name + '-stage-' + [guid]::NewGuid())))
+    $taskPrepared = [IO.Path]::GetFullPath((Join-Path $taskTools ('.' + $Name + '-ready-' + [guid]::NewGuid())))
+    $taskBackup = [IO.Path]::GetFullPath((Join-Path $taskTools ('.' + $Name + '-backup-' + [guid]::NewGuid())))
     $taskToolsAbsolute = [IO.Path]::GetFullPath($taskTools).TrimEnd('\')
-    if (-not $taskStage.StartsWith($taskToolsAbsolute + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Tool staging path escaped the selected tools folder.' }
-    Expand-Archive -LiteralPath $taskArchive -DestinationPath $taskStage
-    $taskBinary = Get-ChildItem -LiteralPath $taskStage -Filter "$Name.exe" -Recurse | Select-Object -First 1
-    if (-not $taskBinary) { throw "The $Name executable was missing from the release archive." }
-    New-Item -ItemType Directory -Force -Path $taskDestination | Out-Null
-    # Preserve the archive's contents, then place its executable and adjacent runtime files at the fixed tool path.
-    Get-ChildItem -LiteralPath $taskStage | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $taskDestination -Recurse -Force }
-    Get-ChildItem -LiteralPath $taskBinary.DirectoryName | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $taskDestination -Recurse -Force }
-    # Only this fresh, checked staging directory is recursively removed.
-    Remove-Item -LiteralPath $taskStage -Recurse -Force
+    foreach ($taskPath in @($taskStage,$taskPrepared,$taskBackup,[IO.Path]::GetFullPath($taskDestination))) {
+        if (-not $taskPath.StartsWith($taskToolsAbsolute + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Tool replacement path escaped the selected tools folder.' }
+    }
+    try {
+        Expand-Archive -LiteralPath $taskArchive -DestinationPath $taskStage
+        $taskBinaries = @(Get-ChildItem -LiteralPath $taskStage -Filter "$Name.exe" -Recurse)
+        if ($taskBinaries.Count -ne 1) { throw "Expected one $Name executable in the verified release archive." }
+        $taskIncoming = $taskBinaries[0].DirectoryName
+        New-Item -ItemType Directory -Path $taskPrepared | Out-Null
+        Get-ChildItem -LiteralPath $taskIncoming | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $taskPrepared -Recurse }
+        # Retain any outer archive notices without copying the executable tree twice.
+        if ($taskIncoming -ne $taskStage) {
+            $taskExtras = @(Get-ChildItem -LiteralPath $taskStage | Where-Object { $_.FullName -ne $taskIncoming })
+            if ($taskExtras.Count) {
+                $taskNotices = Join-Path $taskPrepared 'upstream-extra'; New-Item -ItemType Directory -Path $taskNotices | Out-Null
+                $taskExtras | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $taskNotices -Recurse }
+            }
+        }
+        $taskVersionOutput = & (Join-Path $taskPrepared "$Name.exe") --version 2>&1
+        $taskVersionExit = $LASTEXITCODE
+        if ($taskVersionExit -ne 0) { throw "$Name could not run. The previous installation was retained; inspect setup diagnostics and upstream Windows requirements." }
+        if (Test-Path -LiteralPath $taskDestination) { Move-Item -LiteralPath $taskDestination -Destination $taskBackup }
+        try { Move-Item -LiteralPath $taskPrepared -Destination $taskDestination }
+        catch {
+            if (-not (Test-Path -LiteralPath $taskDestination) -and (Test-Path -LiteralPath $taskBackup)) { Move-Item -LiteralPath $taskBackup -Destination $taskDestination }
+            throw
+        }
+        if (Test-Path -LiteralPath $taskBackup) { Write-Host "Previous $Name files retained for recovery: $taskBackup" }
+        $taskVersionOutput | Select-Object -First 1
+    } finally {
+        # These are only this invocation's fresh, checked staging directories, never the active/backup tool folder.
+        foreach ($taskTemporary in @($taskStage,$taskPrepared)) { if (Test-Path -LiteralPath $taskTemporary) { Remove-Item -LiteralPath $taskTemporary -Recurse -Force } }
+    }
     Remove-Item -LiteralPath $taskArchive
-    $taskVersionOutput = & $taskExecutable --version 2>&1
-    $taskVersionExit = $LASTEXITCODE
-    if ($taskVersionExit -ne 0) { throw "$Name was installed but could not run. Inspect setup diagnostics and the upstream Windows requirements." }
-    $taskVersionOutput | Select-Object -First 1
 }
 
 Install-ProjectTool -Name 'pandoc' -Url 'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip' -Sha256 '6ef431cb20b2c24a0371fc19200dc49d452be54b1b5c9239f3462841ef53e587'
