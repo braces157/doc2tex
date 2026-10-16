@@ -108,3 +108,8 @@
 .ui-version-preview { min-width:0; display:flex; flex-direction:column; gap:10px; }
 .ui-version-preview label { height:auto; }
 .ui-version-asset-note { font-size:12px; line-height:1.6; overflow-wrap:anywhere; color:var(--muted-foreground); }
+.ui-setup-dialog { width:min(640px, calc(100vw - 32px)); max-height:85dvh; overflow-y:auto; }
+.ui-setup-content { display:grid; gap:20px; overflow-wrap:anywhere; }
+.ui-setup-content h3 { font-size:14px; font-weight:600; margin-bottom:6px; }
+.ui-setup-content p { font-size:13px; line-height:1.6; color:#617052; }
+.ui-setup-actions { display:flex; justify-content:flex-end; gap:8px; }

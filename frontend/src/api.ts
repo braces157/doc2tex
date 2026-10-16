@@ -30,6 +30,11 @@ export interface SystemStatus {
   tectonic: boolean
   maxUploadBytes: number
   templates: string[]
+  diagnostics?: { name: string; state: 'ready' | 'missing' | 'unusable'; version: string; guidance: string }[]
+  missingFonts?: string[]
+  texGuidance?: string
+  packaged?: boolean
+  instanceId?: string
 }
 
 export interface LibraryPage {
