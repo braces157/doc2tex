@@ -194,6 +194,49 @@ test('outline follows edits, ignores comments and verbatim, and offers room and 
   await expect(page.getByRole('region', { name: 'Document settings', exact: true })).toBeVisible()
 })
 
+test('outline resumes after literal environment endings with trailing comments', async ({ page }) => {
+  const lines = ['\\documentclass{article}', '\\begin{document}', '\\section{Before examples}']
+  const environments = ['verbatim', 'verbatim*', 'Verbatim', 'lstlisting', 'minted', 'comment']
+  for (const environment of environments) {
+    lines.push(`\\begin{${environment}}`, '\\section{Example only}', `\\end{${environment === 'verbatim' ? 'comment' : 'verbatim'}}`,
+      '\\section{Still inside example}', `  \\end{${environment}}${environment === 'comment' ? '' : '  '}% End of example`, `\\section{After ${environment}}`)
+  }
+  lines.push('\\end{document}')
+  await setup(page, lines.join('\n'))
+  await page.getByRole('button', { name: 'Outline', exact: true }).click()
+  const outline = page.getByRole('navigation', { name: 'Document outline' })
+  await expect(outline.getByRole('button')).toHaveCount(7)
+  for (const [index, environment] of environments.entries()) {
+    await expect(outline.getByRole('button', { name: `After ${environment} ${9 + index * 6}`, exact: true })).toBeVisible()
+  }
+  await outline.getByRole('button', { name: 'After comment 39', exact: true }).click()
+  await expect(page.getByText('Line 39 of 40', { exact: true })).toBeVisible()
+  await expect(editor(page)).toBeFocused()
+})
+
+test('outline keeps escaped percent titles and excludes headings interrupted by a comment', async ({ page }) => {
+  const source = String.raw`\documentclass{article}
+\begin{document}
+\section{Progress \% complete}
+\subsection{Nested {50\%} results}
+\section{An escaped brace \} and \%}
+\section{Unclosed % the closing brace is commented out}
+\section{Line break \\% an unescaped comment hides the closing brace}
+\section{Two backslashes and escaped percent \\\% complete}
+\section{After comments}
+\end{document}`
+  await setup(page, source)
+  await page.getByRole('button', { name: 'Outline', exact: true }).click()
+  const outline = page.getByRole('navigation', { name: 'Document outline' })
+  await expect(outline.getByRole('button')).toHaveCount(5)
+  for (const title of ['Progress \\% complete 3', 'Nested {50\\%} results 4', 'An escaped brace \\} and \\% 5',
+    'Two backslashes and escaped percent \\\\\\% complete 8', 'After comments 9']) {
+    await expect(outline.getByRole('button', { name: title, exact: true })).toBeVisible()
+  }
+  await outline.getByRole('button', { name: 'Progress \\% complete 3', exact: true }).click()
+  await expect(page.getByText('Line 3 of 10', { exact: true })).toBeVisible()
+})
+
 for (const mac of [false, true]) test(`${mac ? 'Cmd' : 'Ctrl'} Save/Build shortcuts obey modal and busy guards`, async ({ page }) => {
   const state = await setup(page, ORIGINAL, mac)
   const modifier = mac ? 'Meta' : 'Control'

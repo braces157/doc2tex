@@ -65,7 +65,8 @@ export function documentHeadings(source: string): { items: OutlineHeading[]; tru
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
     if (literal) {
-      if (line.trim() === `\\end{${literal}}`) literal = undefined
+      const ending = /^\s*\\end\{([^}]+)\}\s*(?:%.*)?$/.exec(line)
+      if (ending?.[1] === literal) literal = undefined
       continue
     }
     const environment = /^\s*\\begin\{(verbatim\*?|Verbatim|lstlisting|minted|comment)\}/.exec(line)
