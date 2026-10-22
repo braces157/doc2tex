@@ -24,6 +24,8 @@ A local DOCX → LaTeX app built with **Spring Boot 4.1.1, Java 21+, React, Type
 
 ## Run on Windows
 
+Windows candidate packages contain the built frontend and a bundled Java runtime; see the included [installation, upgrade and uninstall guide](../packaging/windows/INSTALL.md). They need no developer Java/Node setup. Candidate CI smoke results and outstanding clean-machine acceptance are recorded in [R10 verification](roadmap-r10.md); a CI artifact alone is not a verified clean-VM release.
+
 Prerequisites: JDK 21 or newer and Node.js 24 LTS (recommended). The Maven Wrapper downloads Maven 3.10.0; a system Maven installation is optional. Run commands from this project directory. Replace `./mvnw.cmd` with `./mvnw` on Linux/macOS.
 
 ```powershell
@@ -111,6 +113,7 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/api/system` | Tool availability, templates, upload limit |
+| POST | `/api/system/stop` | Packaged app only: graceful shutdown with the private `X-Doc2tex-Control` token read by Stop doc2TeX.cmd; development servers return 404 |
 | GET | `/api/sample.docx` | Download the sample |
 | POST | `/api/jobs` | Multipart `file`, `template` and optional JSON-string `layout`; returns 202 and a job |
 | POST | `/api/jobs/{id}/layout-copy` | JSON `{ "revision": 1, "template": "report", "layout": {...} }`; creates a separate conversion from the original DOCX, returns 202 and its new job |
@@ -141,6 +144,10 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 
 Conversions: `QUEUED → CONVERTING → COMPLETED / FAILED`.
 Previews: `NOT_REQUESTED → QUEUED → COMPILING → READY / FAILED`.
+
+**Setup diagnostics:** `/api/system` retains `pandoc`/`tectonic` booleans and adds bounded per-tool `diagnostics` (`name`, `state` ready/missing/unusable, `version`, `guidance`), `missingFonts`, `texGuidance`, `packaged` and a public instance ID. It performs no installs or connectivity probe, and never returns the shutdown control token. Font diagnostics check readable file presence, not font coverage/correctness. Open Setup diagnostics from the status button and retry after repair/relaunch. A first PDF build may fetch TeX packages; network/cache failures have different guidance from LaTeX source errors.
+
+Build a Windows candidate on Windows with `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1`. It builds frontend/JAR, verifies pinned Temurin runtime/source archives, and writes a ZIP/checksum under `target/windows-package/`. Build prerequisites remain Java/Node; running the resulting package does not use them. `-SkipBuild` uses an already verified executable JAR. Existing output directories are never deleted; select a fresh `-OutputDirectory` for another build. Use `scripts/test-windows-package.ps1 -PackageDirectory <extracted-app> -EvidenceDirectory <fresh-synthetic-folder> -DownloadTools` for package lifecycle checks. This downloads tools/fonts explicitly and uses isolated storage. CI runs this after regression verification and uploads candidate/evidence artifacts; clean-VM verification remains separately required.
 
 **All documents:** `GET /api/library?query=&status=&sort=newest&page=0&size=20` returns `{items, page, size, total}`. Original filename and display-name matching is case-insensitive and trims surrounding query whitespace; filtering happens over the whole stored collection before pagination. `query` is limited to 200 characters. `status` is empty (all), `QUEUED`, `CONVERTING`, `COMPLETED`, or `FAILED`; `sort` is `newest` or `oldest`. Pages are zero-based, size is 1–100, and invalid parameters return 400. Creation-date ties sort by ascending job ID for both directions. Pages beyond the end return empty items with the actual total. The recent-history endpoint stays capped at 30. The workspace restores the active conversion by ID even when it is absent from recent history. Library selection uses the same unsaved-edit confirmation and draft recovery as recent documents.
 
