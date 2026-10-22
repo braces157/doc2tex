@@ -96,6 +96,147 @@ test('line navigation clamps positions, indentation works and Tab leaves the edi
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
 })
 
+async function selectLine(page: Page, number: number) {
+  const line = page.getByRole('spinbutton', { name: 'Go to line', exact: true })
+  await line.fill(String(number)); await line.press('Enter')
+  await page.keyboard.press('Home'); await page.keyboard.press('Shift+End')
+}
+
+test('formatting preserves selected Unicode, supports shortcuts, and undoes each insertion', async ({ page }) => {
+  const state = await setup(page)
+  await selectLine(page, 3)
+  await page.getByRole('button', { name: 'Bold', exact: true }).click()
+  await expect(editor(page)).toContainText('\\textbf{Original ภาษาไทย 中文}', { useInnerText: true })
+  await expect(editor(page)).toBeFocused()
+  await page.keyboard.press('Control+i')
+  await expect(editor(page)).toContainText('\\textbf{\\textit{Original ภาษาไทย 中文}}', { useInnerText: true })
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(editor(page)).toContainText('\\textbf{Original ภาษาไทย 中文}', { useInnerText: true })
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
+  await page.getByRole('button', { name: 'Toggle comment', exact: true }).click()
+  await expect(editor(page)).toContainText('% Original ภาษาไทย 中文', { useInnerText: true })
+  await page.keyboard.press('Control+/')
+  await expect(editor(page)).toHaveText(ORIGINAL, { useInnerText: true })
+  expect(state.saves).toBe(0); expect(state.builds).toBe(0)
+})
+
+test('Insert selects useful placeholders and keeps its edits in the recoverable draft', async ({ page }) => {
+  const state = await setup(page)
+  await selectLine(page, 3)
+  await page.keyboard.press('Backspace')
+  await page.getByRole('button', { name: 'Insert', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Section heading', exact: true }).click()
+  await expect(editor(page)).toBeFocused()
+  await page.keyboard.insertText('Methods ภาษาไทย')
+  await expect(editor(page)).toContainText('\\section{Methods ภาษาไทย}', { useInnerText: true })
+  await page.keyboard.press('End'); await page.keyboard.press('Enter')
+  await page.getByRole('button', { name: 'Insert', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Bulleted list', exact: true }).click()
+  await expect(editor(page)).toBeFocused()
+  await page.keyboard.insertText('A useful change')
+  await expect(editor(page)).toContainText('\\begin{itemize}\n  \\item A useful change\n\\end{itemize}', { useInnerText: true })
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
+  expect(state.source).toContain('\\section{Methods ภาษาไทย}')
+  expect(state.source).toContain('\\item A useful change')
+  expect(state.builds).toBe(0)
+})
+
+test('command completion and paired braces support keyboard editing without trapping Tab', async ({ page }) => {
+  await setup(page)
+  await selectLine(page, 3); await page.keyboard.press('Backspace')
+  await page.keyboard.type('\\sec')
+  await expect(page.getByRole('option').filter({ hasText: '\\section' })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await page.keyboard.insertText('Results 中文')
+  await expect(editor(page)).toContainText('\\section{Results 中文}', { useInnerText: true })
+  await page.keyboard.press('End'); await page.keyboard.press('Enter')
+  await page.keyboard.type('{')
+  await expect(editor(page)).toContainText('{}', { useInnerText: true })
+  await page.keyboard.type('x'); await page.keyboard.type('}')
+  await expect(editor(page)).toContainText('{x}', { useInnerText: true })
+  await expect(editor(page)).not.toContainText('{x}}', { useInnerText: true })
+  await page.keyboard.press('Tab'); await expect(editor(page)).not.toBeFocused()
+  await selectLine(page, 4); await page.keyboard.press('Backspace')
+  await page.keyboard.type('\\{ \\(')
+  await expect(editor(page).locator('.cm-line').nth(3)).toHaveText('\\{ \\(')
+  await selectLine(page, 4); await page.keyboard.press('Backspace')
+  await page.keyboard.type('% \\sec')
+  await expect(page.getByRole('option')).toHaveCount(0)
+  await selectLine(page, 4); await page.keyboard.press('Backspace')
+  await page.keyboard.type('\\sec')
+  await expect(page.getByRole('option').first()).toBeVisible()
+  await page.keyboard.press('Tab'); await expect(editor(page)).not.toBeFocused()
+})
+
+test('outline follows edits, ignores comments and verbatim, and offers room and guidance', async ({ page }, testInfo) => {
+  const source = '\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nText to edit.\n% \\section{Comment}\n\\begin{verbatim}\n\\section{Example only}\n\\end{verbatim}\n\\subsection{Nested {title}}\nDetails.\n\\end{document}'
+  await setup(page, source)
+  await page.getByRole('button', { name: 'Outline', exact: true }).click()
+  const outline = page.getByRole('navigation', { name: 'Document outline' })
+  await expect(outline.getByRole('button')).toHaveCount(2)
+  await outline.getByRole('button', { name: 'Nested {title} 9', exact: true }).click()
+  await expect(page.getByText('Line 9 of 11', { exact: true })).toBeVisible()
+  await expect(outline.getByRole('button', { name: 'Nested {title} 9', exact: true })).toHaveAttribute('aria-current', 'location')
+  await selectLine(page, 9); await page.keyboard.insertText('\\subsection{Updated heading}')
+  await expect(outline.getByRole('button', { name: 'Updated heading 9', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Editing guide', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Editing guide', exact: true })).toContainText('Save with')
+  await page.getByRole('button', { name: 'Close editing guide', exact: true }).click()
+  await page.getByRole('button', { name: 'Expand editor', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Document settings', exact: true })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Build PDF', exact: true })).toBeEnabled()
+  await page.locator('.editor-shell').screenshot({ path: testInfo.outputPath('source-editor.png') })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+  await page.getByRole('button', { name: 'Exit expanded editor', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Document settings', exact: true })).toBeVisible()
+})
+
+test('outline resumes after literal environment endings with trailing comments', async ({ page }) => {
+  const lines = ['\\documentclass{article}', '\\begin{document}', '\\section{Before examples}']
+  const environments = ['verbatim', 'verbatim*', 'Verbatim', 'lstlisting', 'minted', 'comment']
+  for (const environment of environments) {
+    lines.push(`\\begin{${environment}}`, '\\section{Example only}', `\\end{${environment === 'verbatim' ? 'comment' : 'verbatim'}}`,
+      '\\section{Still inside example}', `  \\end{${environment}}${environment === 'comment' ? '' : '  '}% End of example`, `\\section{After ${environment}}`)
+  }
+  lines.push('\\end{document}')
+  await setup(page, lines.join('\n'))
+  await page.getByRole('button', { name: 'Outline', exact: true }).click()
+  const outline = page.getByRole('navigation', { name: 'Document outline' })
+  await expect(outline.getByRole('button')).toHaveCount(7)
+  for (const [index, environment] of environments.entries()) {
+    await expect(outline.getByRole('button', { name: `After ${environment} ${9 + index * 6}`, exact: true })).toBeVisible()
+  }
+  await outline.getByRole('button', { name: 'After comment 39', exact: true }).click()
+  await expect(page.getByText('Line 39 of 40', { exact: true })).toBeVisible()
+  await expect(editor(page)).toBeFocused()
+})
+
+test('outline keeps escaped percent titles and excludes headings interrupted by a comment', async ({ page }) => {
+  const source = String.raw`\documentclass{article}
+\begin{document}
+\section{Progress \% complete}
+\subsection{Nested {50\%} results}
+\section{An escaped brace \} and \%}
+\section{Unclosed % the closing brace is commented out}
+\section{Line break \\% an unescaped comment hides the closing brace}
+\section{Two backslashes and escaped percent \\\% complete}
+\section{After comments}
+\end{document}`
+  await setup(page, source)
+  await page.getByRole('button', { name: 'Outline', exact: true }).click()
+  const outline = page.getByRole('navigation', { name: 'Document outline' })
+  await expect(outline.getByRole('button')).toHaveCount(5)
+  for (const title of ['Progress \\% complete 3', 'Nested {50\\%} results 4', 'An escaped brace \\} and \\% 5',
+    'Two backslashes and escaped percent \\\\\\% complete 8', 'After comments 9']) {
+    await expect(outline.getByRole('button', { name: title, exact: true })).toBeVisible()
+  }
+  await outline.getByRole('button', { name: 'Progress \\% complete 3', exact: true }).click()
+  await expect(page.getByText('Line 3 of 10', { exact: true })).toBeVisible()
+})
+
 for (const mac of [false, true]) test(`${mac ? 'Cmd' : 'Ctrl'} Save/Build shortcuts obey modal and busy guards`, async ({ page }) => {
   const state = await setup(page, ORIGINAL, mac)
   const modifier = mac ? 'Meta' : 'Control'
@@ -108,6 +249,7 @@ for (const mac of [false, true]) test(`${mac ? 'Cmd' : 'Ctrl'} Save/Build shortc
   state.saveGate = new Promise<void>(resolve => { release = resolve })
   await editor(page).focus(); await page.keyboard.press(`${modifier}+s`)
   await expect(editor(page)).toBeDisabled()
+  for (const name of ['Bold', 'Italic', 'Insert', 'Toggle comment']) await expect(page.getByRole('button', { name, exact: true })).toBeDisabled()
   await page.keyboard.press(`${modifier}+s`); await page.keyboard.press(`${modifier}+Enter`)
   expect(state.saves).toBe(1); expect(state.builds).toBe(0)
   release()
