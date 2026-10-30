@@ -71,12 +71,17 @@ public record LayoutOptions(String paper, BigDecimal fontSize, BigDecimal margin
                 new BigDecimal(properties.getProperty("layout.fontSize", fallback.fontSize().toPlainString())),
                 new BigDecimal(properties.getProperty("layout.marginMm", fallback.marginMm().toPlainString())),
                 properties.getProperty("layout.title", ""), properties.getProperty("layout.author", ""), properties.getProperty("layout.date", ""),
-                Boolean.parseBoolean(properties.getProperty("layout.preserveSourceLayout", "false")),
-                Boolean.parseBoolean(properties.getProperty("layout.aiLayout", "false"))); }
+                flag(properties, "preserveSourceLayout"), flag(properties, "aiLayout")); }
         catch (RuntimeException exception) {
             LOG.warn("Invalid persisted layout settings; using legacy defaults. Saved source and history are unchanged.");
             return fallback;
         }
+    }
+
+    private static boolean flag(Properties properties, String name) {
+        String value = properties.getProperty("layout." + name, "false");
+        if (!value.equals("true") && !value.equals("false")) throw new IllegalArgumentException("Invalid persisted layout flag.");
+        return Boolean.parseBoolean(value);
     }
 
     void write(Properties properties) {

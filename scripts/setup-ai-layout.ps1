@@ -99,6 +99,15 @@ function Set-DockerRenderer {
     Write-Host "Docker renderer selected in $taskSettings"
 }
 
+function Clear-DockerRenderer {
+    $taskSettings = Join-Path $taskTools 'layout-ai/renderer.properties'
+    if (-not (Test-Path -LiteralPath $taskSettings)) { return }
+    $taskPattern = '(?m)^\s*doc2tex\.ai-layout\.docker-image\s*[=:][^\r\n]*\r?\n?'
+    $taskText = [regex]::Replace([IO.File]::ReadAllText($taskSettings), $taskPattern, '')
+    if ($taskText.Trim()) { [IO.File]::WriteAllText($taskSettings, $taskText.TrimStart("`r", "`n")) }
+    else { Remove-Item -LiteralPath $taskSettings -Force }
+}
+
 $taskRevision = '46bbdf188bb0a772c08aed74882ce7e51a8f1ea6'
 $taskModelBase = "https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_onnx/resolve/$taskRevision"
 Get-VerifiedFile "$taskModelBase/inference.onnx" (Join-Path $taskTools 'layout-ai/inference.onnx') '45bf71750b00739a41fc209f132eb104a4d6b5bb29483c9078164d8b87cf28ba'
@@ -191,4 +200,5 @@ if (-not $SkipRenderProbe) {
     Write-Host (Invoke-HiddenProcess $taskSoffice @("-env:UserInstallation=$taskProfileUri", '--headless', '--nologo', '--nodefault', '--nofirststartwizard', '--norestore', '--convert-to', 'pdf:writer_pdf_Export', '--outdir', $taskProbe.Directory, (Join-Path $taskProbe.Directory 'source.docx')) 'libreoffice-render.log' 120)
     Confirm-RenderProbe $taskProbe.Pdf
 }
+Clear-DockerRenderer
 Write-Host 'Local AI layout prerequisites ready. No PATH or registry settings were changed.'

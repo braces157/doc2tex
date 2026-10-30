@@ -99,7 +99,9 @@ class AiLayoutIntegrationTest {
                         super.writeString(text, positions);
                     }
                 };
-                String text = stripper.getText(pdf); assertTrue(text.contains("BODY_CHECKPOINT_3_1"), text);
+                String text = stripper.getText(pdf);
+                for (int section = 0; section < 4; section++) for (int paragraph = 0; paragraph < 2; paragraph++)
+                    assertTrue(text.contains("BODY_CHECKPOINT_" + section + "_" + paragraph), text);
                 if (columns) {
                     assertFalse(intro.isEmpty()); assertFalse(evaluation.isEmpty());
                     assertTrue(intro.getFirst() < pdf.getPage(0).getMediaBox().getWidth() / 2);

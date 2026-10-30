@@ -95,6 +95,19 @@ test('new conversions retain original layout by default and reload the saved cho
   await expect(page.getByLabel('Date text', { exact: true })).toHaveValue('2026')
 })
 
+test('clearing the margin then enabling original layout restores a usable fallback', async ({ page }) => {
+  await setup(page)
+  const original = page.getByRole('checkbox', { name: 'Use original page size and margins', exact: true })
+  const margins = page.getByLabel('Margins (mm)', { exact: true })
+  await original.uncheck()
+  await margins.fill('')
+  await expect(page.getByRole('alert')).toBeVisible()
+  await original.check()
+  await expect(margins).toBeDisabled()
+  await expect(margins).toHaveValue('25.4')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
 test('legacy saved layouts remain manual and original-layout copies preserve parent edits', async ({ page }) => {
   const state = await setup(page)
   const original = page.getByRole('checkbox', { name: 'Use original page size and margins', exact: true })

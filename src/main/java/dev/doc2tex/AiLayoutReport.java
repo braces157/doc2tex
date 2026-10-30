@@ -42,7 +42,7 @@ record AiLayoutReport(Status status, String model, int totalPages, List<Page> pa
     }
     static AiLayoutReport failed() {
         return new AiLayoutReport(Status.FAILED, "PP-DocLayoutV3", 0, List.of(), List.of(), List.of(), false, 0,
-                List.of("AI layout analysis could not finish. Conversion used the original Word structure. See setup diagnostics before retrying."));
+                List.of("AI layout analysis could not finish. Reinstall the local AI layout files with the setup script, then retry. Conversion used the original Word structure."));
     }
 
     AiLayoutReport applied(List<String> applied, int columnBreaks, boolean missingBreaks) {
@@ -50,6 +50,12 @@ record AiLayoutReport(Status status, String model, int totalPages, List<Page> pa
         if (applied.size() < headings.size()) notes.add("Some visual headings could not be matched safely in the converted document and were left unchanged.");
         if (missingBreaks) notes.add("Some explicit Word column breaks could not be mapped safely. Review where columns start.");
         return new AiLayoutReport(status, model, totalPages, pages, headings, applied, twoColumns, columnBreaks, notes);
+    }
+
+    AiLayoutReport unverified() {
+        var notes = new ArrayList<>(warnings);
+        notes.add("The applied AI layout decisions could not be verified. Compare the converted headings and columns with the original.");
+        return new AiLayoutReport(status, model, totalPages, pages, headings, List.of(), twoColumns, 0, notes);
     }
 
     void save(Path output) throws IOException { Files.write(output.resolve("ai-layout.json"), JSON.writeValueAsBytes(this)); }

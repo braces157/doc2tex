@@ -139,7 +139,10 @@ class ConversionService {
             }
             if (Files.size(output.resolve("main.tex")) > MAX_SOURCE) throw new IOException("The generated LaTeX exceeds the 2 MB editor limit.");
             try { aiReport = aiLayout.finish(output, aiReport); }
-            catch (IOException | RuntimeException exception) { log.warn("Cannot read the applied AI layout decisions for {}", id); }
+            catch (IOException | RuntimeException exception) {
+                log.warn("Cannot read the applied AI layout decisions for {}", id);
+                aiReport = aiReport == null ? null : aiReport.unverified();
+            }
             String warnings = result.log().isBlank() ? "" : "\nPandoc messages:\n" + result.log();
             String review = inspector.review(directory.resolve("input.docx"), null).findings().stream()
                     .map(finding -> "\n[" + finding.severity() + "] " + finding.title() + ": " + finding.detail())

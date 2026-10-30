@@ -22,7 +22,10 @@ record AiLayoutSettings(boolean enabled, String model, String renderer, int maxP
     Path modelPath() { return Path.of(model).toAbsolutePath().normalize(); }
 
     String rendererExecutable() {
-        if (!renderer.isBlank()) return renderer;
+        if (!renderer.isBlank()) {
+            boolean bare = !renderer.contains("/") && !renderer.contains("\\");
+            return bare || Path.of(renderer).isAbsolute() ? renderer : Path.of(renderer).toAbsolutePath().toString();
+        }
         if (System.getProperty("os.name").startsWith("Windows")) {
             for (Path path : new Path[]{Path.of(".tools/libreoffice/program/soffice.com"),
                     Path.of(System.getenv().getOrDefault("ProgramFiles", "C:/Program Files"), "LibreOffice/program/soffice.com")})

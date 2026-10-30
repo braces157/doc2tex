@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Job, LayoutOptions } from './api'
-import { jobTitle, savedLayout, validLayout } from './api'
+import { DEFAULT_LAYOUT, jobTitle, savedLayout, validLayout } from './api'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog'
 
@@ -13,6 +13,7 @@ export function LayoutSettings({ layout, onChange, template, onTemplate, job, di
     : layout.paper === 'a4' && layout.fontSize === 11 && layout.marginMm === 25 && template === 'article' ? 'paper'
       : layout.paper === 'letter' && layout.fontSize === 12 && layout.marginMm === 25.4 && template === 'report' ? 'report' : 'custom'
   const change = <K extends keyof LayoutOptions>(key: K, value: LayoutOptions[K]) => onChange({ ...layout, [key]: value })
+  const preserve = () => onChange({ ...layout, preserveSourceLayout: true, marginMm: Number.isFinite(layout.marginMm) ? layout.marginMm : DEFAULT_LAYOUT.marginMm })
   const summary = (value: LayoutOptions) => value.preserveSourceLayout
     ? `Original page size and margins · ${value.fontSize} pt`
     : `${value.paper.toUpperCase()} · ${value.fontSize} pt · ${value.marginMm} mm margins`
@@ -28,10 +29,10 @@ export function LayoutSettings({ layout, onChange, template, onTemplate, job, di
     <fieldset disabled={disabled} className="ui-layout-fields"><legend className="sr-only">Document layout options</legend>
       <label className="ui-layout-wide ui-layout-original"><input type="checkbox" checked={Boolean(layout.aiLayout)} onChange={event => change('aiLayout', event.target.checked)} />AI layout assistance</label>
       <p className="ui-layout-wide ui-layout-hint">Recognize headings and columns automatically while preserving the original text. If local AI setup is unavailable, conversion continues and the review explains the fallback.</p>
-      <label className="ui-layout-wide ui-layout-original"><input type="checkbox" checked={Boolean(layout.preserveSourceLayout)} onChange={event => change('preserveSourceLayout', event.target.checked)} />Use original page size and margins</label>
+      <label className="ui-layout-wide ui-layout-original"><input type="checkbox" checked={Boolean(layout.preserveSourceLayout)} onChange={event => event.target.checked ? preserve() : change('preserveSourceLayout', false)} />Use original page size and margins</label>
       {layout.preserveSourceLayout && <p className="ui-layout-wide ui-layout-hint">Page size, orientation, and margins come from the Word document. Detected settings and any limitations appear in the conversion review.</p>}
       <label className="ui-layout-wide">Layout preset<select value={preset} onChange={event => {
-        if (event.target.value === 'original') change('preserveSourceLayout', true)
+        if (event.target.value === 'original') preserve()
         if (event.target.value === 'custom') change('preserveSourceLayout', false)
         if (event.target.value === 'paper') { onTemplate('article'); onChange({ ...layout, preserveSourceLayout: false, paper: 'a4', fontSize: 11, marginMm: 25 }) }
         if (event.target.value === 'report') { onTemplate('report'); onChange({ ...layout, preserveSourceLayout: false, paper: 'letter', fontSize: 12, marginMm: 25.4 }) }

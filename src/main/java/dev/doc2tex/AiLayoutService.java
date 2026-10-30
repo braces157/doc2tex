@@ -65,19 +65,26 @@ final class AiLayoutService {
             LOG.warn("AI layout assistance failed for {}; retaining Word structure", directory.getFileName(), exception);
             report = AiLayoutReport.failed();
         }
-        report.save(output);
-        if (!report.headings().isEmpty() || report.twoColumns()) {
-            var starts = report.twoColumns() ? WordLayout.read(original).columnStarts() : List.<String>of();
-            Files.write(output.resolve("ai-layout-plan.json"), JSON.writeValueAsBytes(Map.of("headings", report.headings(), "columnStarts", starts)));
-            try (var input = new ClassPathResource("ai-layout.lua").getInputStream()) {
-                Files.copy(input, output.resolve("ai-layout.lua"), StandardCopyOption.REPLACE_EXISTING);
+        boolean headings = !report.headings().isEmpty() || report.twoColumns();
+        try {
+            if (headings) {
+                var starts = report.twoColumns() ? WordLayout.read(original).columnStarts() : List.<String>of();
+                Files.write(output.resolve("ai-layout-plan.json"), JSON.writeValueAsBytes(Map.of("headings", report.headings(), "columnStarts", starts)));
+                try (var input = new ClassPathResource("ai-layout.lua").getInputStream()) {
+                    Files.copy(input, output.resolve("ai-layout.lua"), StandardCopyOption.REPLACE_EXISTING);
+                }
             }
-            command.add("--lua-filter=ai-layout.lua");
-        }
-        if (report.twoColumns()) {
-            var source = WordLayout.read(original);
-            Files.writeString(output.resolve("ai-layout-columns.tex"), "\\setlength{\\columnsep}{" + source.columnGapMm().toPlainString() + "mm}\n");
-            command.add("--variable=classoption:twocolumn"); command.add("--include-in-header=ai-layout-columns.tex");
+            if (report.twoColumns()) {
+                var source = WordLayout.read(original);
+                Files.writeString(output.resolve("ai-layout-columns.tex"), "\\setlength{\\columnsep}{" + source.columnGapMm().toPlainString() + "mm}\n");
+            }
+            report.save(output);
+            if (headings) command.add("--lua-filter=ai-layout.lua");
+            if (report.twoColumns()) { command.add("--variable=classoption:twocolumn"); command.add("--include-in-header=ai-layout-columns.tex"); }
+        } catch (IOException | RuntimeException exception) {
+            LOG.warn("AI layout artifacts could not be written for {}; retaining Word structure", directory.getFileName(), exception);
+            report = AiLayoutReport.failed();
+            report.save(output);
         }
         return report;
     }

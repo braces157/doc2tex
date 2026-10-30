@@ -128,6 +128,13 @@ EOF
     printf '\ndoc2tex.ai-layout.docker-image=%s\n' "$image" >> "$temporary"
     mv -f -- "$temporary" "$settings"
     echo "Docker renderer selected in $settings; inference stays on the host."
+  else
+    settings=.tools/layout-ai/renderer.properties
+    if [[ -f "$settings" ]]; then
+      temporary=$(mktemp "$settings.XXXXXXXX")
+      awk '!/^[[:space:]]*doc2tex[.]ai-layout[.]docker-image[[:space:]]*[=:]/' "$settings" > "$temporary"
+      if [[ -s "$temporary" ]]; then mv -f -- "$temporary" "$settings"; else rm -f -- "$temporary" "$settings"; fi
+    fi
   fi
 fi
 echo 'Local AI layout prerequisites ready.'

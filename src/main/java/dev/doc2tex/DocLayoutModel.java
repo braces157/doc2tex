@@ -186,7 +186,8 @@ final class DocLayoutModel implements AutoCloseable {
                 }
                 if (overlap > .7f) {
                     boolean different = !a.label().equals(b.label());
-                    if (different && (VISUAL_LABELS.contains(a.label()) || VISUAL_LABELS.contains(b.label()))
+                    if (different && (VISUAL_LABELS.contains(a.label()) || VISUAL_LABELS.contains(b.label())
+                            || a.label().equals("paragraph_title") || b.label().equals("paragraph_title"))
                             && ((!a.label().equals("table") && !b.label().equals("table"))
                             || (VISUAL_LABELS.contains(a.label()) && VISUAL_LABELS.contains(b.label())))) continue;
                     dropped[area(a) >= area(b) ? j : i] = true;

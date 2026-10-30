@@ -117,7 +117,7 @@ class SourceLayoutTest {
     }
 
     @Test void refusesExternalEntitiesAndOversizedXml() throws Exception {
-        Path secret = directory.resolve("secret.txt"); Files.writeString(secret, "SECRET_LAYOUT_SENTINEL");
+        Path secret = directory.resolve("secret.txt"); Files.writeString(secret, section(12240, 15840, 1440, 1440, 1440, 1440));
         var bytes = new ByteArrayOutputStream();
         try (var zip = new ZipOutputStream(bytes)) {
             zip.putNextEntry(new ZipEntry("word/document.xml"));
@@ -127,7 +127,7 @@ class SourceLayoutTest {
         }
         Path file = directory.resolve("external.docx"); Files.write(file, bytes.toByteArray());
         var report = SourceLayout.inspect(file);
-        assertTrue(report.sections().isEmpty()); assertFalse(report.toString().contains("SECRET_LAYOUT_SENTINEL"));
+        assertTrue(report.sections().isEmpty(), "External entities must never supply page settings");
         report = inspect(" ".repeat(8 * 1024 * 1024), null);
         assertTrue(report.sections().isEmpty()); assertTrue(report.warnings().getFirst().contains("safely"));
     }

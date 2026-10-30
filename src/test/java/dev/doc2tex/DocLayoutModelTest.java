@@ -63,6 +63,14 @@ class DocLayoutModelTest {
         assertEquals(List.of(0, 5, 6), regions.stream().map(DocLayoutModel.Region::order).toList());
     }
 
+    @Test void keepsAParagraphTitleInsideALargerTextBlock() throws Exception {
+        var regions = DocLayoutModel.regions(new float[][] {
+                {22, .9f, 10, 10, 180, 90, 0},
+                {17, .9f, 20, 14, 170, 30, 1}
+        }, 200, 100);
+        assertEquals(List.of("text", "paragraph_title"), regions.stream().map(DocLayoutModel.Region::label).toList());
+    }
+
     @Test void dropsHugeLandscapeImageWithoutLosingRealTextOrSoleImage() throws Exception {
         float[] image = {14, .9f, 0, 0, 190, 95, 0};
         var regions = DocLayoutModel.regions(new float[][] {image, {22, .9f, 10, 10, 180, 30, 1}}, 200, 100);
