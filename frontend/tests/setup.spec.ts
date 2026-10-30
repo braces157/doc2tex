@@ -10,6 +10,7 @@ test('setup distinguishes tools, fonts and PDF downloads and retries without los
     const path = new URL(route.request().url()).pathname
     if (path === '/api/system') return failed ? route.fulfill({ status: 503, json: { message: 'Synthetic setup check unavailable' } }) : route.fulfill({ json: {
       pandoc: ready, tectonic: false, maxUploadBytes: 20971520, templates: ['article', 'report'], packaged: true,
+      aiLayout: { state: ready ? 'ready' : 'missing', guidance: ready ? 'Local AI layout is available.' : 'Run the AI layout setup script. Standard conversion remains available.' },
       diagnostics: [{ name: 'Pandoc', state: ready ? 'ready' : 'missing', version: ready ? 'pandoc synthetic' : '', guidance: ready ? 'Pandoc is ready.' : 'Close the app and run Install tools.cmd.' },
         { name: 'Tectonic', state: 'unusable', version: '', guidance: 'Repair the PDF compiler. Source and ZIP export remain available.' }],
       missingFonts: ['NotoSansThai-Regular.ttf'], texGuidance: 'The first PDF build may download TeX packages. A populated cache is not proof every document works offline.' } })
@@ -30,12 +31,14 @@ test('setup distinguishes tools, fonts and PDF downloads and retries without los
   await page.getByRole('button', { name: 'Setup diagnostics', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Setup diagnostics', exact: true })
   await expect(dialog).toContainText('Pandoc · missing'); await expect(dialog).toContainText('Tectonic · unusable')
+  await expect(dialog).toContainText('AI layout assistance · missing'); await expect(dialog).toContainText('Standard conversion remains available')
   await expect(dialog).toContainText('NotoSansThai-Regular.ttf'); await expect(dialog).toContainText('first PDF build may download')
   await expect(dialog).toContainText('Projects and settings are retained'); await dialog.screenshot({ path: testInfo.outputPath('setup-diagnostics.png') })
   failed = true; await dialog.getByRole('button', { name: 'Check again', exact: true }).click()
   await expect(dialog.getByRole('alert')).toContainText('Synthetic setup check unavailable')
   failed = false; ready = true; await dialog.getByRole('button', { name: 'Check again', exact: true }).click()
   await expect(dialog).toContainText('Pandoc · ready'); await expect(dialog).toContainText('pandoc synthetic')
+  await expect(dialog).toContainText('AI layout assistance · ready')
   await dialog.getByRole('button', { name: 'Close', exact: true }).last().click()
   await expect(page.getByRole('button', { name: 'Setup diagnostics', exact: true })).toContainText('Ready to convert')
   await expect(editor).toHaveText(draft, { useInnerText: true })

@@ -11,6 +11,9 @@ import org.springframework.stereotype.Component;
 
 @Component
 class Tools {
+    private static final java.util.concurrent.ScheduledExecutorService CAPTURE_CLEANUP = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+        var thread = new Thread(task, "doc2tex-probe-cleanup"); thread.setDaemon(true); return thread;
+    });
     private final String pandoc;
     private final String tectonic;
     private final Path fonts;
@@ -54,18 +57,24 @@ class Tools {
     boolean available(String executable) { return probe.check("Tool", executable).state().equals("ready"); }
 
     static Diagnostic inspect(String name, String executable) {
+        return inspect(name, executable, List.of("--version"));
+    }
+
+    static Diagnostic inspect(String name, String executable, List<String> arguments) {
         Process process = null;
+        Path capture = null;
         try {
-            process = new ProcessBuilder(executable, "--version").redirectErrorStream(true)
+            var command = new java.util.ArrayList<String>(); command.add(executable); command.addAll(arguments);
+            capture = Files.createTempFile("doc2tex-tool-probe-", ".log");
+            process = new ProcessBuilder(command).redirectErrorStream(true)
+                    .redirectOutput(capture.toFile())
                     .start();
-            Process running = process;
-            var output = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try (var input = running.getInputStream()) { return new String(input.readNBytes(4096), StandardCharsets.UTF_8); }
-                catch (IOException ignored) { return ""; }
-            });
             if (!process.waitFor(3, TimeUnit.SECONDS)) return new Diagnostic(name, "unusable", "", name + " did not respond. Close the app, repair/install tools, and relaunch.");
             if (process.exitValue() != 0) return new Diagnostic(name, "unusable", "", name + " exited with an error. Close the app and repair its tool installation.");
-            String version = output.get(1, TimeUnit.SECONDS).lines().findFirst().orElse("").replaceAll("[\\p{Cntrl}]", "");
+            String version;
+            try (var input = Files.newInputStream(capture)) {
+                version = new String(input.readNBytes(4096), StandardCharsets.UTF_8).lines().findFirst().orElse("").replaceAll("[\\p{Cntrl}]", "");
+            }
             return new Diagnostic(name, "ready", version.substring(0, Math.min(version.length(), 200)), name + " is ready.");
         } catch (IOException exception) {
             boolean present;
@@ -77,6 +86,18 @@ class Tools {
             return new Diagnostic(name, "unusable", "", name + " could not be checked. Retry diagnostics or repair its tool installation.");
         } finally {
             if (process != null && process.isAlive()) { process.descendants().forEach(ProcessHandle::destroyForcibly); process.destroyForcibly(); }
+            if (capture != null) try { Files.deleteIfExists(capture); }
+            catch (IOException exception) { deleteCaptureLater(capture, 10); }
         }
+    }
+
+    private static void deleteCaptureLater(Path capture, int attempts) {
+        CAPTURE_CLEANUP.schedule(() -> {
+            try { Files.deleteIfExists(capture); }
+            catch (IOException exception) {
+                if (attempts > 1) deleteCaptureLater(capture, attempts - 1);
+                else capture.toFile().deleteOnExit();
+            }
+        }, 1, TimeUnit.SECONDS);
     }
 }

@@ -41,7 +41,9 @@ class LayoutOptionsTest {
     private LayoutOptions options(String paper, int font, String margin) { return new LayoutOptions(paper, font, new BigDecimal(margin), "LAYOUT_TITLE A&B_#% \\input{R08_SENTINEL} ภาษาไทย中文", "AUTHOR_METADATA Jane Doe", "2026-10-16"); }
 
     @Test void optionsValidateAndLegacyMetadataMigratesWithoutRewritingSource() throws Exception {
-        var defaults = LayoutOptions.defaults(); assertEquals(defaults, LayoutOptions.parse(null));
+        var defaults = LayoutOptions.defaults(); assertEquals(LayoutOptions.uploadDefaults(), LayoutOptions.parse(null));
+        assertFalse(defaults.preserveSourceLayout(), "Legacy settings retain their original conversion behavior");
+        assertEquals(defaults, LayoutOptions.parse("{\"paper\":\"letter\",\"fontSize\":10,\"marginMm\":25.4,\"title\":\"\",\"author\":\"\",\"date\":\"\"}"));
         for (String json : List.of("null", "{}", "[]", "{\"paper\":\"a4;input\"}", "x".repeat(8193))) assertThrows(ApiException.class, () -> LayoutOptions.parse(json));
         for (String margin : List.of("9.9", "50.1", "25.45")) assertThrows(ApiException.class, () -> options("a4", 11, margin));
         assertThrows(ApiException.class, () -> options("legal", 11, "25")); assertThrows(ApiException.class, () -> options("a4", 14, "25"));

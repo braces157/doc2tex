@@ -61,7 +61,7 @@ class ConversionIntegrationTest {
         var layout = new LayoutOptions("a4", 11, new java.math.BigDecimal("20"), "HTTP_TITLE & metadata", "Author", "2026");
         var parts = new LinkedMultiValueMap<String, Object>();
         parts.add("file", new ByteArrayResource(SampleDocument.create()) { @Override public String getFilename() { return "layout-http.docx"; } });
-        parts.add("template", "article"); parts.add("layout", JsonMapper.builder().build().writeValueAsString(layout));
+        parts.add("template", "article"); parts.add("layout", "{\"paper\":\"a4\",\"fontSize\":11,\"marginMm\":20,\"title\":\"HTTP_TITLE & metadata\",\"author\":\"Author\",\"date\":\"2026\"}");
         Job parent = await(client().post().uri("/api/jobs").contentType(MediaType.MULTIPART_FORM_DATA).body(parts).retrieve().body(Job.class));
         assertEquals("COMPLETED", parent.status()); assertEquals(layout, parent.layout());
         String edited = service.source(parent.id()) + "\n% HTTP_KEEP_PARENT_EDIT"; parent = service.saveSource(parent.id(), edited, 0);
@@ -83,6 +83,15 @@ class ConversionIntegrationTest {
         var before = store.list().size(); parts.set("layout", "{\"paper\":\"a4\",\"fontSize\":11.9,\"marginMm\":20,\"title\":\"\",\"author\":\"\",\"date\":\"\"}");
         var invalidUpload = assertThrows(HttpClientErrorException.class, () -> client().post().uri("/api/jobs").contentType(MediaType.MULTIPART_FORM_DATA).body(parts).retrieve().body(String.class));
         assertEquals(HttpStatus.BAD_REQUEST, invalidUpload.getStatusCode()); assertEquals(before, store.list().size());
+    }
+
+    @Test void omittedUploadLayoutEnablesSourcePageDetection() throws Exception {
+        assumeTrue(tools.available(tools.pandoc()));
+        Job job = await(upload("automatic-layout.docx", SampleDocument.create(), "article"));
+        assertEquals("COMPLETED", job.status()); assertTrue(job.layout().preserveSourceLayout());
+        var review = client().get().uri("/api/jobs/" + job.id() + "/review").retrieve().body(DocumentInspector.Review.class);
+        assertTrue(review.findings().stream().anyMatch(finding -> finding.code().equals("source-page-layout-review")),
+                "SampleDocument omits margins: the API must show the fallback instead of claiming source geometry");
     }
 
     @Test void diagnosticsRouteKeepsRevisionAndTruncationAndHandlesInterruptedMetadata() throws Exception {

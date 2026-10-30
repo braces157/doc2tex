@@ -15,8 +15,9 @@ export interface Job {
   layout?: LayoutOptions
 }
 
-export interface LayoutOptions { paper: 'a4' | 'letter'; fontSize: number; marginMm: number; title: string; author: string; date: string }
-export const DEFAULT_LAYOUT: LayoutOptions = { paper: 'letter', fontSize: 10, marginMm: 25.4, title: '', author: '', date: '' }
+export interface LayoutOptions { paper: 'a4' | 'letter'; fontSize: number; marginMm: number; title: string; author: string; date: string; preserveSourceLayout?: boolean; aiLayout?: boolean }
+export const DEFAULT_LAYOUT: LayoutOptions = { paper: 'letter', fontSize: 10, marginMm: 25.4, title: '', author: '', date: '', preserveSourceLayout: true, aiLayout: true }
+export const savedLayout = (layout?: LayoutOptions): LayoutOptions => ({ ...DEFAULT_LAYOUT, ...layout, preserveSourceLayout: layout?.preserveSourceLayout ?? false, aiLayout: layout?.aiLayout ?? false })
 const safeLayoutText = (value: string) => !Array.from(value).some(character => {
   const point = character.codePointAt(0)!
   return point < 32 || (point >= 127 && point <= 159) || (point >= 0xd800 && point <= 0xdfff)
@@ -35,6 +36,7 @@ export interface SystemStatus {
   texGuidance?: string
   packaged?: boolean
   instanceId?: string
+  aiLayout?: { state: 'ready' | 'missing' | 'disabled' | 'unusable'; guidance: string }
 }
 
 export interface LibraryPage {
