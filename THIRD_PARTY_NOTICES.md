@@ -9,7 +9,10 @@ The [MIT license](LICENSE) covers doc2TeX's original code. Dependencies and down
 | PDF.js | Apache-2.0 | Browser PDF viewer and worker |
 | CodeMirror and Lezer | MIT | LaTeX editor, commands, search, highlighting and parser runtime; exact versions/licenses in the frontend inventory |
 | Playwright | Apache-2.0 | Development-only browser test runner; not included in application assets |
-| Apache PDFBox | Apache-2.0 | Test-only PDF text inspection; not included in the application JAR |
+| Apache PDFBox | Apache-2.0 | Source PDF rendering and text-region matching in the application JAR; also used by verification tests |
+| Microsoft ONNX Runtime | MIT | CPU inference engine in the application JAR; native platform libraries and upstream notices retained |
+| PP-DocLayoutV3 | Apache-2.0 | Separately downloaded, checksum-pinned PaddlePaddle ONNX model for optional local layout analysis |
+| LibreOffice | MPL-2.0 and upstream component licenses | Separately downloaded source-document renderer, invoked as a process; extracted upstream licenses and notices retained |
 | Geist font | SIL OFL-1.1 | Bundled browser font |
 | Customized shadcn/ui components | MIT | Source in `frontend/src/components/ui`; [license](LICENSES/shadcn-ui.txt) |
 | Apache Maven Wrapper | Apache-2.0 | Wrapper scripts retain their upstream headers |

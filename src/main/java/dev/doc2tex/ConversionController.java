@@ -30,7 +30,9 @@ class ConversionController {
         this.tools = tools;
     }
 
-    @GetMapping("/system") Map<String, Object> system() { return tools.status(); }
+    @GetMapping("/system") Map<String, Object> system() {
+        var status = new java.util.LinkedHashMap<>(tools.status()); status.put("aiLayout", service.aiLayoutStatus()); return status;
+    }
     @GetMapping("/jobs") List<Job> list() { return store.list(); }
     @GetMapping("/library")
     JobStore.LibraryPage library(@RequestParam(defaultValue = "") String query,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { ConversionReview, Job, LayoutOptions, SystemStatus } from './api'
-import { api, DEFAULT_LAYOUT, downloadText, isWorking, isMissingDocument, validLayout } from './api'
+import { api, DEFAULT_LAYOUT, downloadText, isWorking, isMissingDocument, savedLayout, validLayout } from './api'
 import { WorkspaceView } from './WorkspaceView'
 import { useDiscardConfirmation } from './components/DiscardConfirmation'
 import { useSourceDocument } from './useSourceDocument'
@@ -83,7 +83,7 @@ export default function App() {
           const previous = await api<Job>(`/jobs/${encodeURIComponent(id)}`, { signal: controller.signal })
           if (!controller.signal.aborted && navigationVersion.current === initialNavigation) {
             currentId.current = previous.id; setJob(previous); setTemplate(previous.template)
-            setLayout(previous.layout ?? { ...DEFAULT_LAYOUT })
+            setLayout(savedLayout(previous.layout))
           }
         } catch (e) {
           if (!controller.signal.aborted && navigationVersion.current === initialNavigation)
@@ -192,7 +192,7 @@ export default function App() {
     rememberJob(next.id)
     setReviewResult(null)
     setJob(next); setFile(null); setTemplate(next.template); setError(''); setView('source')
-    setLayout(next.layout ?? { ...DEFAULT_LAYOUT })
+    setLayout(savedLayout(next.layout))
   }
 
   const copyLayout = async () => {

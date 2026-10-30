@@ -35,9 +35,16 @@ class ConversionService {
     private final AppProperties properties;
     private final DocumentInspector inspector;
     private final FontSupport fonts;
+    private final AiLayoutService aiLayout;
     private final ThreadPoolExecutor executor;
 
     ConversionService(JobStore store, Tools tools, ToolRunner runner, DocxValidator validator, AppProperties properties, DocumentInspector inspector, FontSupport fonts) {
+        this(store, tools, runner, validator, properties, inspector, fonts, new AiLayoutService(AiLayoutSettings.disabled(), runner));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    ConversionService(JobStore store, Tools tools, ToolRunner runner, DocxValidator validator, AppProperties properties, DocumentInspector inspector,
+            FontSupport fonts, AiLayoutService aiLayout) {
         this.store = store;
         this.tools = tools;
         this.runner = runner;
@@ -45,13 +52,16 @@ class ConversionService {
         this.properties = properties;
         this.inspector = inspector;
         this.fonts = fonts;
+        this.aiLayout = aiLayout;
         executor = new ThreadPoolExecutor(properties.workers(), properties.workers(), 0, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(properties.queueCapacity()), Thread.ofPlatform().name("conversion-", 0).factory(),
                 new ThreadPoolExecutor.AbortPolicy());
     }
 
+    AiLayoutService.Status aiLayoutStatus() { return aiLayout.status(); }
+
     Job submit(MultipartFile file, String template) throws IOException {
-        return submit(file, template, LayoutOptions.defaults());
+        return submit(file, template, LayoutOptions.uploadDefaults());
     }
 
     Job submit(MultipartFile file, String template, LayoutOptions layout) throws IOException {
@@ -116,17 +126,28 @@ class ConversionService {
                     "--standalone", "--wrap=none", "--track-changes=accept", "--extract-media=media", "--metadata=date:",
                     "--variable=documentclass:" + job.template(),
                     "--output=main.tex", conversionInput.toString()));
-            job.layout().prepare(output, command);
-            fonts.prepare(inspector.review(directory.resolve("input.docx"), null), output, command, job.layout().metadataText());
+            SourceLayout sourceLayout = job.layout().preserveSourceLayout() ? SourceLayout.inspect(directory.resolve("input.docx")) : null;
+            if (sourceLayout != null) sourceLayout.save(output);
+            job.layout().prepare(output, command, sourceLayout);
             WordReferenceSupport.configure(command);
+            AiLayoutReport aiReport = aiLayout.prepare(directory.resolve("input.docx"), directory, output, job.layout(), command);
+            fonts.prepare(inspector.review(directory.resolve("input.docx"), null), output, command, job.layout().metadataText());
             ToolRunner.Result result = runner.run(command, output, directory.resolve("conversion.log"),
                     properties.conversionTimeoutSeconds());
             if (result.exitCode() != 0 || !Files.isRegularFile(output.resolve("main.tex"))) {
                 throw new IOException("Pandoc could not convert this document. It may be damaged or contain unsupported content.");
             }
             if (Files.size(output.resolve("main.tex")) > MAX_SOURCE) throw new IOException("The generated LaTeX exceeds the 2 MB editor limit.");
+            try { aiReport = aiLayout.finish(output, aiReport); }
+            catch (IOException | RuntimeException exception) { log.warn("Cannot read the applied AI layout decisions for {}", id); }
             String warnings = result.log().isBlank() ? "" : "\nPandoc messages:\n" + result.log();
             String review = inspector.review(directory.resolve("input.docx"), null).findings().stream()
+                    .map(finding -> "\n[" + finding.severity() + "] " + finding.title() + ": " + finding.detail())
+                    .collect(java.util.stream.Collectors.joining());
+            String pageReview = sourceLayout == null ? "" : sourceLayout.findings().stream()
+                    .map(finding -> "\n[" + finding.severity() + "] " + finding.title() + ": " + finding.detail())
+                    .collect(java.util.stream.Collectors.joining());
+            String aiReview = aiReport == null ? "" : aiReport.findings().stream()
                     .map(finding -> "\n[" + finding.severity() + "] " + finding.title() + ": " + finding.detail())
                     .collect(java.util.stream.Collectors.joining());
             Files.writeString(output.resolve("README.txt"), "Converted with doc2TeX and Pandoc.\n\n"
@@ -135,7 +156,7 @@ class ConversionService {
                     + "If a fonts folder is included, select XeLaTeX as the compiler in Overleaf or your TeX editor.\n"
                     + "Initial conversion layout: " + job.layout().description() + ". See layout-settings.json for structured settings.\n"
                     + "Settings describe conversion; later manual source edits take precedence.\n"
-                    + "Review equations, references and complex tables against the original.\n" + review + warnings);
+                    + "Review equations, references and complex tables against the original.\n" + aiReview + pageReview + review + warnings);
             store.versions().initialize(store.get(id), directory, false);
             store.save(store.get(id).withStatus("COMPLETED", result.log().isBlank()
                     ? "LaTeX and extracted images are ready." : "LaTeX is ready. See README.txt in the ZIP for conversion messages."));
@@ -288,6 +309,20 @@ class ConversionService {
         Path log = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
         var detected = inspector.review(directory.resolve("input.docx"), log);
         var findings = new ArrayList<>(detected.findings());
+        if (job.layout().aiLayout() && job.status().equals("COMPLETED")) {
+            try { findings.addAll(AiLayoutReport.read(directory.resolve("output")).findings()); }
+            catch (IOException | RuntimeException exception) {
+                findings.add(new DocumentInspector.Finding("ai-layout-review", "warning", "AI layout report unavailable",
+                        "The initial AI layout decisions could not be verified. Original text and saved source remain available."));
+            }
+        }
+        if (job.layout().preserveSourceLayout() && job.status().equals("COMPLETED")) {
+            try { findings.addAll(SourceLayout.read(directory.resolve("output")).findings()); }
+            catch (IOException | RuntimeException exception) {
+                findings.add(new DocumentInspector.Finding("source-page-layout-review", "warning", "Page settings could not be verified",
+                        "The saved page-layout report is unavailable. Compare the page size and margins with the original."));
+            }
+        }
         var scripts = new java.util.LinkedHashSet<>(detected.scripts());
         var metadataScripts = new java.util.LinkedHashSet<String>(); DocumentInspector.detectScripts(job.layout().metadataText(), metadataScripts);
         metadataScripts.removeAll(scripts); scripts.addAll(metadataScripts);
@@ -484,6 +519,12 @@ class ConversionService {
     private void writeArchiveLocked(String id, OutputStream stream) throws IOException {
         Job job = ready(id);
         Path output = store.directory(id).resolve("output");
+        SourceLayout sourceLayout = null;
+        AiLayoutReport aiReport = null;
+        if (job.layout().aiLayout()) try { aiReport = AiLayoutReport.read(output); }
+        catch (IOException | RuntimeException exception) { log.warn("Cannot export the AI layout report for {}", id); }
+        if (job.layout().preserveSourceLayout()) try { sourceLayout = SourceLayout.read(output); }
+        catch (IOException | RuntimeException exception) { log.warn("Cannot export the page-layout report for {}", id); }
         try (ZipOutputStream zip = new ZipOutputStream(stream); var paths = Files.walk(output)) {
             zip.putNextEntry(new ZipEntry("main.tex"));
             zip.write(store.versions().current(job, store.directory(id)));
@@ -494,6 +535,15 @@ class ConversionService {
             zip.putNextEntry(new ZipEntry("layout-settings.json"));
             zip.write(JsonMapper.builder().build().writeValueAsBytes(job.layout()));
             zip.closeEntry();
+            if (aiReport != null) {
+                zip.putNextEntry(new ZipEntry("ai-layout.json"));
+                zip.write(JsonMapper.builder().build().writeValueAsBytes(aiReport)); zip.closeEntry();
+            }
+            if (sourceLayout != null) {
+                zip.putNextEntry(new ZipEntry("source-layout.json"));
+                zip.write(JsonMapper.builder().build().writeValueAsBytes(sourceLayout));
+                zip.closeEntry();
+            }
             var bibliography = store.versions().bibliography(job, store.directory(id), job.revision());
             if (bibliography != null) for (var entry : bibliography.files().entrySet()) {
                 zip.putNextEntry(new ZipEntry(BibliographyAssets.FOLDER + "/" + entry.getKey())); zip.write(entry.getValue()); zip.closeEntry();

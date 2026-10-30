@@ -110,6 +110,10 @@
 .ui-layout-fields .ui-layout-wide { grid-column: 1 / -1; }
 .ui-layout-fields input, .ui-layout-fields select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; }
 .ui-layout-fields :is(input,select):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ui-layout-fields .ui-layout-original { display: flex; align-items: flex-start; gap: 8px; line-height: 1.6; }
+.ui-layout-fields .ui-layout-original input { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; accent-color: var(--primary); }
+.ui-layout-hint { color: var(--muted-foreground); font-size: 12px; line-height: 1.6; margin: 0; }
+.ui-layout-fields :is(input,select):disabled { opacity: .55; cursor: not-allowed; }
 .ui-bibliography { margin-top: 18px; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; font-size: 13px; }
 .ui-bibliography > summary { cursor: pointer; font-weight: 600; }
 .ui-bibliography-panel { display: grid; gap: 14px; padding-top: 14px; min-width: 0; }

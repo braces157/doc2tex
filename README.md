@@ -21,6 +21,8 @@
 Upload a document, choose Article or Report, and edit the resulting LaTeX. Build a PDF when you're ready, then take the source, images, and required fonts with you in one ZIP.
 
 - **Structure that stays useful.** Headings, lists, tables, links, footnotes, images, and native Word equations convert through Pandoc.
+- **Original page settings.** New conversions detect page size, landscape orientation, and all four margins. Choose custom settings when needed; the review explains unsupported layouts and fallbacks.
+- **Optional local AI layout.** PP-DocLayoutV3 helps recover unstyled headings and supported two-column layouts while keeping the original text and equations editable. The review records applied changes and fallbacks. See [AI setup and limits](docs/development.md#ai-layout-assistance).
 - **An editor and PDF viewer together.** Format selected text, insert headings/lists/equations, complete common commands, and navigate a document outline. Expand the editor and build a PDF from the source toolbar. See the [source editing guide](docs/source-editor.md).
 - **Pick up unfinished edits.** Recover browser-local drafts after reopening a document, and retry source loading without risking a blank overwrite.
 - **Review before you trust.** Source feature counts and warnings call out tracked changes, merged cells, headers, charts, captions, and compiler problems.
@@ -108,6 +110,8 @@ downloaded tools live in .tools/  (Git-ignored)
 ```
 
 Read the [development guide](docs/development.md) for API routes, settings, persistence, and verification commands. Contributions are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For proposed features, priorities, and implementation tasks for future agents, see the [customer-focused roadmap](docs/roadmap.md).
 
 ## License
 
