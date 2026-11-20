@@ -25,9 +25,15 @@ class DocumentInspector {
     record Finding(String code, String severity, String title, String detail) {}
     record Review(Map<String, Integer> elements, List<Finding> findings, List<String> compilerWarnings, List<String> scripts, String scope,
                   Integer revision, List<ReviewEvidence.Paragraph> originalText, List<ReviewEvidence.Item> items,
-                  List<ReviewDecisions.Decision> decisions, boolean originalTruncated, String decisionError) {
+                  List<ReviewDecisions.Decision> decisions, boolean originalTruncated, String decisionError,
+                  ReadinessCheck.Report readiness) {
         Review(Map<String, Integer> elements, List<Finding> findings, List<String> compilerWarnings, List<String> scripts, String scope) {
-            this(elements, findings, compilerWarnings, scripts, scope, null, List.of(), List.of(), List.of(), false, "");
+            this(elements, findings, compilerWarnings, scripts, scope, null, List.of(), List.of(), List.of(), false, "", null);
+        }
+        Review(Map<String, Integer> elements, List<Finding> findings, List<String> compilerWarnings, List<String> scripts, String scope,
+               Integer revision, List<ReviewEvidence.Paragraph> originalText, List<ReviewEvidence.Item> items,
+               List<ReviewDecisions.Decision> decisions, boolean originalTruncated, String decisionError) {
+            this(elements, findings, compilerWarnings, scripts, scope, revision, originalText, items, decisions, originalTruncated, decisionError, null);
         }
     }
     static void detectScripts(String value, Set<String> scripts) {

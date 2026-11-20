@@ -1,1 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="360" height="100" viewBox="0 0 360 100" role="img" aria-labelledby="title"><title id="title">doc2TeX</title><rect width="360" height="100" rx="20" fill="#293025"/><path d="M47 27h-7v15l-8 8 8 8v15h7m24-46h7v15l8 8-8 8v15h-7" fill="none" stroke="#c4db9f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><text x="108" y="64" fill="#eff4e7" font-family="Segoe UI,Arial,sans-serif" font-weight="600" font-size="39" letter-spacing="-1.5">doc<tspan fill="#c4db9f">2</tspan>TeX.</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="100" viewBox="0 0 360 100" role="img" aria-labelledby="title">
+  <title id="title">doc2TeX</title>
+  <rect x="0.5" y="0.5" width="359" height="99" rx="12" fill="#f5f3ee" stroke="#cfc9bc"/>
+  <g transform="translate(28, 22) scale(1.1667)">
+    <rect width="48" height="48" rx="9" fill="#1f4d3a"/>
+    <path d="M22 11.5h-8a2.5 2.5 0 0 0-2.5 2.5v20a2.5 2.5 0 0 0 2.5 2.5h8" fill="none" stroke="#f5f3ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M16.5 19h6.5M16.5 29h6.5" stroke="#d5e6de" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M16.5 24h5" stroke="#e08e45" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M27.5 11.5c2.8 0 4 1.5 4 4.2v4.3c0 2.3 1.3 3.5 3.8 4-2.5.5-3.8 1.7-3.8 4v4.3c0 2.7-1.2 4.2-4 4.2" fill="none" stroke="#f5f3ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="104" y="59" fill="#181715" font-family="'Geist Mono Variable','Cascadia Code','Consolas',monospace" font-weight="650" font-size="34" letter-spacing="-1.2">doc<tspan fill="#c26d2d">2</tspan>T<tspan dy="5">E</tspan><tspan dy="-5">X</tspan></text>
+</svg>

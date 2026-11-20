@@ -127,7 +127,15 @@ class SourceVersionStore {
         return commit(current, directory, source, restoredFrom, persist, bibliography(current, directory, restoredFrom < 0 ? current.revision() : restoredFrom));
     }
 
+    Job commitAutoFix(Job current, Path directory, String source, Commit persist) throws IOException {
+        return commit(current, directory, source, -1, persist, bibliography(current, directory, current.revision()), "auto-fixed");
+    }
+
     Job commit(Job current, Path directory, String source, int restoredFrom, Commit persist, BibliographyAssets bibliography) throws IOException {
+        return commit(current, directory, source, restoredFrom, persist, bibliography, restoredFrom < 0 ? "saved" : "restored");
+    }
+
+    private Job commit(Job current, Path directory, String source, int restoredFrom, Commit persist, BibliographyAssets bibliography, String origin) throws IOException {
         recover(current, directory);
         if (!initialized(directory)) throw new IOException("The current source is unavailable; history cannot be initialized.");
         History history = list(current, directory);
@@ -138,7 +146,7 @@ class SourceVersionStore {
                     "Saved history is full (" + maxVersions + " versions or " + maxBytes + " bytes). Download this source and export the project before starting a new document. Existing versions have been preserved.");
         if (current.revision() == Integer.MAX_VALUE) throw new ApiException(HttpStatus.CONFLICT, "This project's revision limit has been reached.");
         Job next = current.edited();
-        writeSnapshot(directory, next.revision(), bytes, restoredFrom < 0 ? "saved" : "restored", restoredFrom, bibliography);
+        writeSnapshot(directory, next.revision(), bytes, origin, restoredFrom, bibliography);
         checkpoint(Stage.SNAPSHOT_PUBLISHED);
         replaceCache(directory, bytes, bibliography);
         checkpoint(Stage.CACHE_REPLACED);

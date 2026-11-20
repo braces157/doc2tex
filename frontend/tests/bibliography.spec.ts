@@ -142,7 +142,7 @@ test('import, exact setup preview, undoable insertion, Unicode search and build 
   await panel(page).screenshot({ path: testInfo.outputPath('bibliography-key-search.png') })
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
   await page.getByRole('tab', { name: 'Preview', exact: true }).click(); await page.getByRole('button', { name: 'Build PDF preview', exact: true }).click()
-  await expect(page.getByText('Setting your words in place…', { exact: true })).toBeVisible()
+  await expect(page.getByText('Compiling PDF…', { exact: true })).toBeVisible()
   expect(state.compiled?.bib).toBe(BIB); expect(state.compiled?.source).toContain('\\cite{doe2024}'); expect(state.compiled?.source).toContain('Keep local notes.')
 })
 

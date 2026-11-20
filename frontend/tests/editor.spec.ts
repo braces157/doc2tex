@@ -255,7 +255,7 @@ for (const mac of [false, true]) test(`${mac ? 'Cmd' : 'Ctrl'} Save/Build shortc
   release()
   await expect(editor(page)).toBeEnabled()
   await page.keyboard.press(`${modifier}+Enter`)
-  await expect(page.getByText('Setting your words in place…', { exact: true })).toBeVisible()
+  await expect(page.getByText('Compiling PDF…', { exact: true })).toBeVisible()
   expect(state.builds).toBe(1); expect(state.saves).toBe(1)
   await page.getByRole('tab', { name: 'Source', exact: true }).click()
   await expect(editor(page)).toBeDisabled()

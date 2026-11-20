@@ -10,13 +10,42 @@ interface Props {
 }
 
 export function ConversionReview({ review, job, dirty, canDecide, saving, error, onRetry, onDecide, onCompare, onNavigate, onCaptionRepairs }: Props) {
-  if (!job) return <div className="review-empty"><div className="review-empty-icon"><CheckCircle size={32} weight="light" /></div><h3>Know what made the journey.</h3><p>After conversion, see the document features we detected and the details worth reviewing.</p><div className="review-checklist"><span>Document structure</span><span>Equations & images</span><span>Fonts & compiler warnings</span></div></div>
-  if (!review) return error ? <div className="review-empty" role="alert"><p>Could not load conversion review: {error}</p><button onClick={onRetry}>Retry conversion review</button></div> : <div className="review-empty" aria-busy="true">Inspecting your document…</div>
+  if (!job) return <div className="review-empty"><div className="review-empty-icon"><CheckCircle size={32} weight="light" /></div><h3>No review yet</h3><p>After conversion, this tab lists detected document features and any items that need a manual check.</p><div className="review-checklist"><span>Document structure</span><span>Equations & images</span><span>Fonts & compiler warnings</span></div></div>
+  if (!review) return error ? <div className="review-empty" role="alert"><p>Could not load conversion review: {error}</p><button onClick={onRetry}>Retry conversion review</button></div> : <div className="review-empty" aria-busy="true">Analyzing document…</div>
   const warnings = review.findings.filter(finding => finding.severity === 'warning').length + review.compilerWarnings.length
+  const readinessActions = review.readiness?.actions ?? []
+  const blockingActions = readinessActions.filter(action => action.severity === 'blocking').length
+  const issueCount = review.readiness ? readinessActions.length : warnings
   const items = review.items ?? [], decisions = review.decisions ?? []
   return <div className="review-content">
-    <div className="review-summary"><div><span className="ui-eyebrow">CONVERSION REVIEW</span><h3>{warnings ? 'A few details to check.' : 'Ready for your final read.'}</h3></div><Badge variant="outline" className={warnings ? 'review-warning-badge' : 'review-clear-badge'}>{warnings ? `${warnings} to review` : 'No flags detected'}</Badge></div>
+    <div className="review-summary"><div><span className="ui-eyebrow">CONVERSION REVIEW</span><h3>{blockingActions > 0 ? 'Action needed before sharing' : issueCount ? 'Some items need review' : 'No issues detected'}</h3></div><Badge variant="outline" className={blockingActions > 0 ? 'review-blocking-badge' : issueCount ? 'review-warning-badge' : 'review-clear-badge'}>{issueCount ? `${issueCount} to review` : 'No flags detected'}</Badge></div>
     <p className="review-intro">Detected in your Word document</p><div className="review-metrics">{Object.entries(review.elements).map(([name, count]) => <div key={name}><strong>{count.toString().padStart(2,'0')}</strong><span>{name}</span></div>)}</div>
+    {review.readiness && review.readiness.autoFixes.length > 0 && (
+      <section className="review-auto-fixes" aria-label="Handled automatically">
+        <div className="review-auto-fixes-head">
+          <CheckCircle size={17} weight="fill" />
+          <strong>Handled automatically</strong>
+        </div>
+        <ul>
+          {review.readiness.autoFixes.map(fix => (
+            <li key={fix.code}><strong>{fix.title}:</strong> {fix.detail}</li>
+          ))}
+        </ul>
+      </section>
+    )}
+    {readinessActions.length > 0 && (
+      <section className="review-readiness-actions" aria-label="Readiness checks">
+        {readinessActions.map(action => (
+          <div className={`review-finding ${action.severity === 'blocking' ? 'blocking' : 'warning'}`} key={`readiness-${action.code}`}>
+            <Warning size={18} />
+            <div>
+              <strong>{action.title}</strong>
+              <p>{action.guidance}</p>
+            </div>
+          </div>
+        ))}
+      </section>
+    )}
     <button className="secondary-button" disabled={!canDecide || saving} onClick={onCaptionRepairs}>Preview caption repairs</button>
     {error && <p role="alert">Could not update review decisions: {error} <button onClick={onRetry}>Reload conversion review</button></p>}
     {review.decisionError && <p role="alert">{review.decisionError}</p>}
@@ -47,7 +76,7 @@ export function ConversionReview({ review, job, dirty, canDecide, saving, error,
     </div>}
     {review.compilerWarnings.map((warning,index) => <div className="review-finding compiler-warning" key={`compiler-${index}`}><Warning size={19} /><div><strong>PDF needs review</strong><p>{warning}</p></div></div>)}
     {review.findings.map(finding => <div className={`review-finding ${finding.severity}`} key={finding.code}>{finding.severity === 'warning' ? <Warning size={18} /> : <Info size={18} />}<div><strong>{finding.title}</strong><p>{finding.detail}</p></div></div>)}
-    {!review.findings.length && !review.compilerWarnings.length && <div className="review-finding info"><CheckCircle size={18} /><div><strong>No common conversion risks detected</strong><p>Read through your equations, tables, and references before publishing.</p></div></div>}
+    {!review.findings.length && !review.compilerWarnings.length && !readinessActions.length && <div className="review-finding info"><CheckCircle size={18} /><div><strong>No common conversion risks detected</strong><p>Read through your equations, tables, and references before publishing.</p></div></div>}
     <div className="review-scope"><Info size={15} /><p>{review.scope}{job.revision > 0 && ' You have edited this source; counts still describe the original Word document.'}</p></div>
     {['READY','FAILED'].includes(job.previewStatus) && <a className="review-log-link" href={`/api/jobs/${job.id}/preview/log`} target="_blank" rel="noreferrer">Open compiler log <ArrowUpRight size={13} /></a>}
   </div>

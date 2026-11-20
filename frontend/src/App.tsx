@@ -24,6 +24,7 @@ export default function App() {
   const [previewStarting, setPreviewStarting] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [autoPrepare, setAutoPrepare] = useState(true)
   const [view, setView] = useState<'source' | 'pdf' | 'review'>('source')
   const [reviewResult, setReviewResult] = useState<{ key: string; data: ConversionReview | null; error: string } | null>(null)
   const [reviewAttempt, setReviewAttempt] = useState(0)
@@ -31,6 +32,7 @@ export default function App() {
   const [bibliographySaving, setBibliographySaving] = useState(false)
   const [deletedId, setDeletedId] = useState<string | null>(null)
   const currentId = useRef<string | null>(null)
+  const autoLandPreviewId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
   const editorRef = useRef<LatexEditorHandle>(null)
   const [diagnosticTarget, setDiagnosticTarget] = useState<{ id: string; line: number; revision: number } | null>(null)
@@ -120,6 +122,16 @@ export default function App() {
     return () => { controller.abort(); window.removeEventListener('focus', check); window.removeEventListener('storage', onStorage) }
   }, [jobId, noteMissing])
 
+  const maybeAutoLandPreview = useCallback((next: Job) => {
+    if (autoLandPreviewId.current !== next.id) return
+    if (next.status === 'COMPLETED' && (next.previewStatus === 'COMPILING' || next.previewStatus === 'READY')) {
+      autoLandPreviewId.current = null
+      setView('pdf')
+    } else if (next.status === 'FAILED' || next.previewStatus === 'FAILED') {
+      autoLandPreviewId.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (!jobId || (!isWorking(jobStatus ?? '') && !isWorking(previewStatus ?? ''))) return
     const controller = new AbortController()
@@ -130,6 +142,7 @@ export default function App() {
         if (controller.signal.aborted || currentId.current !== next.id) return
         setJob(next)
         setHistory(previous => previous.map(item => item.id === next.id ? next : item))
+        maybeAutoLandPreview(next)
         if (isWorking(next.status) || isWorking(next.previewStatus)) timeout = setTimeout(poll, 1200)
       } catch (e) {
         if (!controller.signal.aborted) {
@@ -141,7 +154,7 @@ export default function App() {
     }
     timeout = setTimeout(poll, 500)
     return () => { controller.abort(); clearTimeout(timeout) }
-  }, [jobId, jobStatus, previewStatus, noteMissing])
+  }, [jobId, jobStatus, previewStatus, noteMissing, maybeAutoLandPreview])
 
   useEffect(() => {
     if (!jobId || jobStatus !== 'COMPLETED') return
@@ -151,6 +164,11 @@ export default function App() {
       .catch((error: Error) => { if (!controller.signal.aborted) setReviewResult({ key: reviewKey, data: null, error: error.message }) })
     return () => controller.abort()
   }, [jobId, jobStatus, reviewKey])
+
+  const selectView = (nextView: 'source' | 'pdf' | 'review') => {
+    autoLandPreviewId.current = null
+    setView(nextView)
+  }
 
   const discardChanges = async () => {
     if (!(await confirmDiscard())) return false
@@ -173,12 +191,15 @@ export default function App() {
       const body = new FormData()
       body.append('file', selected); body.append('template', template)
       body.append('layout', JSON.stringify(layout))
+      body.append('autoPrepare', String(autoPrepare))
       const next = await api<Job>('/jobs', { method: 'POST', body })
       sourceDocument.discardEdits()
       navigationVersion.current++
       currentId.current = next.id
+      autoLandPreviewId.current = autoPrepare ? next.id : null
       rememberJob(next.id)
       setJob(next); setReviewResult(null); setView('source')
+      maybeAutoLandPreview(next)
       setLayout(next.layout ?? layout)
       setHistory(previous => [next, ...previous.filter(item => item.id !== next.id)])
     } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed. Try again.') }
@@ -189,6 +210,7 @@ export default function App() {
     if (switchingDisabled || next.id === job?.id || !(await discardChanges())) return
     navigationVersion.current++
     currentId.current = next.id
+    autoLandPreviewId.current = null
     rememberJob(next.id)
     setReviewResult(null)
     setJob(next); setFile(null); setTemplate(next.template); setError(''); setView('source')
@@ -202,7 +224,7 @@ export default function App() {
       const next = await api<Job>(`/jobs/${job.id}/layout-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: job.revision, template, layout }) })
       if (currentId.current !== job.id) return false
-      navigationVersion.current++; currentId.current = next.id; rememberJob(next.id)
+      navigationVersion.current++; currentId.current = next.id; autoLandPreviewId.current = null; rememberJob(next.id)
       setJob(next); setFile(null); setReviewResult(null); setView('source')
       setLayout(next.layout ?? layout)
       setHistory(previous => [next, ...previous.filter(item => item.id !== next.id)])
@@ -216,6 +238,7 @@ export default function App() {
     if (switchingDisabled || !(await discardChanges())) return
     navigationVersion.current++
     currentId.current = null
+    autoLandPreviewId.current = null
     rememberJob(null)
     setReviewResult(null)
     setJob(null); setFile(null); setError(''); setView('source')
@@ -250,14 +273,27 @@ export default function App() {
 
   const buildPreview = async () => {
     if (!job || missingDocument || !source.trim() || compiling || saving || !system?.tectonic || !sourceDocument.ready || sourceDocument.recovery || busy) return
-    if (!dirty && job.previewStatus === 'READY') { setView('pdf'); return }
+    if (!dirty && job.previewStatus === 'READY') { selectView('pdf'); return }
     setError(''); setPreviewStarting(true)
     try {
       const next = dirty ? await save() : job
       if (!next) return
       setJob(await api<Job>(`/jobs/${next.id}/preview`, { method: 'POST' }))
-      setView('pdf')
+      selectView('pdf')
     } catch (e) { noteMissing(job.id, e); setError(e instanceof Error ? e.message : 'Could not start PDF compilation.') }
+    finally { setPreviewStarting(false) }
+  }
+
+  const verifyPreview = async () => {
+    if (!job || missingDocument || dirty || compiling || saving || busy || job.previewStatus !== 'READY') return
+    setError(''); setPreviewStarting(true)
+    try {
+      const next = await api<Job>(`/jobs/${job.id}/preview`, { method: 'POST' })
+      if (currentId.current !== next.id) return
+      setJob(next)
+      setHistory(previous => previous.map(item => item.id === next.id ? next : item))
+      setReviewAttempt(attempt => attempt + 1)
+    } catch (e) { noteMissing(job.id, e); setError(e instanceof Error ? e.message : 'Could not verify the PDF preview.') }
     finally { setPreviewStarting(false) }
   }
 
@@ -292,7 +328,7 @@ export default function App() {
       if (currentId.current !== result.job.id) return false
       setJob(result.job); sourceDocument.markSaved(result.job, result.source)
       setHistory(previous => previous.map(item => item.id === result.job.id ? result.job : item))
-      setView('source'); toast.success(`Version ${version} restored as version ${result.job.revision}`)
+      selectView('source'); toast.success(`Version ${version} restored as version ${result.job.revision}`)
       return true
     } catch (error) { noteMissing(job.id, error); throw error }
     finally { setSaving(false) }
@@ -307,7 +343,7 @@ export default function App() {
       if (currentId.current !== result.job.id) return false
       setJob(result.job); sourceDocument.markSaved(result.job, result.source)
       setHistory(previous => previous.map(item => item.id === result.job.id ? result.job : item))
-      setView('source'); toast.success(`Caption repairs saved as version ${result.job.revision}`)
+      selectView('source'); toast.success(`Caption repairs saved as version ${result.job.revision}`)
       return true
     } catch (error) { noteMissing(job.id, error); throw error }
     finally { setSaving(false) }
@@ -341,7 +377,7 @@ export default function App() {
     catch { /* Server deletion has succeeded; storage cleanup cannot undo it. */ }
     setHistory(previous => previous.filter(item => item.id !== removed.id))
     if (currentId.current === removed.id) {
-      currentId.current = null; rememberJob(null)
+      currentId.current = null; autoLandPreviewId.current = null; rememberJob(null)
       setJob(null); setFile(null); setReviewResult(null); setView('source'); setError('')
     }
   }
@@ -368,7 +404,7 @@ export default function App() {
   const navigateSource = (line: number, revision: number) => {
     if (!job || dirty || job.revision !== revision || !readyForActions || saving || compiling) return
     setDiagnosticTarget({ id: job.id, line, revision })
-    setView('source')
+    selectView('source')
   }
   const revealCitation = useEffectEvent((id: string, key: string, revision: number) => {
     if (currentId.current !== id || job?.revision !== revision || !readyForActions || saving || compiling || !/^[A-Za-z0-9_][A-Za-z0-9:._+-]{0,127}$/.test(key)) {
@@ -378,7 +414,7 @@ export default function App() {
   })
   const insertCitation = (key: string, revision: number) => {
     if (!job || job.revision !== revision || !readyForActions || saving || compiling) return
-    setCitationTarget({ id: job.id, key, revision }); setView('source')
+    setCitationTarget({ id: job.id, key, revision }); selectView('source')
   }
   useEffect(() => {
     if (!citationTarget || view !== 'source') return
@@ -423,6 +459,7 @@ export default function App() {
   return <>
     <WorkspaceView model={{ system, setSystem, history, job, file, template, layout, setLayout, copyLayout, source, sourceLoading, error, saving,
       dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
+      autoPrepare, setAutoPrepare,
       sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
       recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,
       missingDocument, renamed, deleted,
@@ -434,11 +471,11 @@ export default function App() {
       applyCaptionRepairs,
       bibliographySaving, importBibliography, setupBibliography, insertCitation,
       retrySource: sourceDocument.retry, restoreDraft: sourceDocument.restoreDraft, discardDraft: sourceDocument.discardDraft,
-      selectFile, setDragging, setTemplate, setView, setSource: sourceDocument.changeSource, setError,
+      selectFile, setDragging, setTemplate, setView: selectView, setSource: sourceDocument.changeSource, setError,
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),
       startConversion: () => void startConversion(), save: () => void save(), copy: () => void copy(),
       download: () => void download(), downloadTex: () => downloadText(source, 'main.tex'),
-      buildPreview: () => void buildPreview() }} />
+      buildPreview: () => void buildPreview(), verifyPreview: () => void verifyPreview() }} />
     {dialog}
   </>
 }
