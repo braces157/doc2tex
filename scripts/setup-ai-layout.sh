@@ -36,9 +36,8 @@ download() {
   fi
   mv -f -- "$partial" "$destination"
 }
-model_base=https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_onnx/resolve/46bbdf188bb0a772c08aed74882ce7e51a8f1ea6
-download "$model_base/inference.onnx" .tools/layout-ai/inference.onnx 45bf71750b00739a41fc209f132eb104a4d6b5bb29483c9078164d8b87cf28ba
-download "$model_base/inference.yml" .tools/layout-ai/inference.yml 506fcfac13b3b546ae40d7886b44126420f392adb694e3f8bb6a6286a1f90fdc
+download https://huggingface.co/stefanj0/PP-DocLayout-S-ONNX/resolve/7e851b9e5ad66613d7318a3213ab3336ebe0a514/pp_doclayout_s.onnx .tools/layout-ai/inference.onnx 33688dbee1c23e34b81777e97cb428eb40f24b242c02b5f623484959e830aec8
+download https://huggingface.co/PaddlePaddle/PP-DocLayout-S/resolve/8ac289e66575bb9bba6e15c53719d8b15cc9b3b2/inference.yml .tools/layout-ai/inference.yml 6f690098c438214c67822239a568f0bc2bbe97a8f02fba93e492d4f2c47523c3
 
 image=doc2tex-layout-renderer:26.2.6
 if $docker_renderer; then

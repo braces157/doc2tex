@@ -9,6 +9,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 record AiLayoutReport(Status status, String model, int totalPages, List<Page> pages, List<Heading> headings,
                       List<String> appliedHeadings, boolean twoColumns, int appliedColumnBreaks, List<String> warnings) {
+    static final float MIN_HEADING_CONFIDENCE = .6f;
+    private static final java.util.Set<String> SUPPORTED_MODELS = java.util.Set.of(DocLayoutModel.MODEL_NAME, "PP-DocLayoutV3");
     enum Status { ANALYZED, UNAVAILABLE, FAILED }
     record Page(int number, List<DocLayoutModel.Region> regions) {
         Page {
@@ -19,7 +21,7 @@ record AiLayoutReport(Status status, String model, int totalPages, List<Page> pa
     record Heading(int sourceParagraph, int page, String text, float confidence) {
         Heading {
             if (sourceParagraph < 1 || page < 1 || text == null || text.isBlank() || text.length() > 200
-                    || !Float.isFinite(confidence) || confidence < .8f || confidence > 1)
+                    || !Float.isFinite(confidence) || confidence < MIN_HEADING_CONFIDENCE || confidence > 1)
                 throw new IllegalArgumentException("Invalid visual heading match.");
         }
     }
@@ -28,7 +30,7 @@ record AiLayoutReport(Status status, String model, int totalPages, List<Page> pa
     AiLayoutReport {
         pages = List.copyOf(pages); headings = List.copyOf(headings);
         appliedHeadings = List.copyOf(appliedHeadings); warnings = List.copyOf(warnings);
-        if (status == null || !"PP-DocLayoutV3".equals(model) || totalPages < 0 || pages.size() > 12
+        if (status == null || model == null || !SUPPORTED_MODELS.contains(model) || totalPages < 0 || pages.size() > 12
                 || pages.size() > totalPages || headings.size() > 100 || appliedHeadings.size() > headings.size() || warnings.size() > 20
                 || appliedColumnBreaks < 0 || appliedColumnBreaks > 100 || (!twoColumns && appliedColumnBreaks != 0)
                 || (status != Status.ANALYZED && (!pages.isEmpty() || !headings.isEmpty() || !appliedHeadings.isEmpty() || twoColumns))
@@ -38,10 +40,10 @@ record AiLayoutReport(Status status, String model, int totalPages, List<Page> pa
     }
 
     static AiLayoutReport unavailable(String reason) {
-        return new AiLayoutReport(Status.UNAVAILABLE, "PP-DocLayoutV3", 0, List.of(), List.of(), List.of(), false, 0, List.of(reason));
+        return new AiLayoutReport(Status.UNAVAILABLE, DocLayoutModel.MODEL_NAME, 0, List.of(), List.of(), List.of(), false, 0, List.of(reason));
     }
     static AiLayoutReport failed() {
-        return new AiLayoutReport(Status.FAILED, "PP-DocLayoutV3", 0, List.of(), List.of(), List.of(), false, 0,
+        return new AiLayoutReport(Status.FAILED, DocLayoutModel.MODEL_NAME, 0, List.of(), List.of(), List.of(), false, 0,
                 List.of("AI layout analysis could not finish. Reinstall the local AI layout files with the setup script, then retry. Conversion used the original Word structure."));
     }
 

@@ -18,7 +18,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Page geometry from current Word sections; text and native equations still go through Pandoc. */
 record SourceLayout(List<SourceLayout.Page> sections, List<String> warnings) {
-    private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final int XML_LIMIT = 8 * 1024 * 1024;
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
@@ -61,34 +60,39 @@ record SourceLayout(List<SourceLayout.Page> sections, List<String> warnings) {
             var entry = zip.getEntry("word/document.xml");
             if (entry == null) return fallback("The document has no page settings.");
             Document document = parse(zip, "word/document.xml");
+            String ns = Ooxml.wordNamespace(document.getDocumentElement());
+            if (ns == null) return fallback("The document body could not be inspected.");
             if (zip.getEntry("word/settings.xml") != null) {
                 Document settings = parse(zip, "word/settings.xml");
-                for (String feature : List.of("mirrorMargins", "gutterAtTop", "bookFoldPrinting", "bookFoldRevPrinting")) {
-                    var nodes = settings.getElementsByTagNameNS(W, feature);
-                    for (int i = 0; i < nodes.getLength(); i++) if (enabled((Element) nodes.item(i)))
-                        return fallback("Mirrored margins or book-binding settings need manual layout review.");
+                String settingsNs = Ooxml.wordNamespace(settings.getDocumentElement());
+                if (settingsNs != null) {
+                    for (String feature : List.of("mirrorMargins", "gutterAtTop", "bookFoldPrinting", "bookFoldRevPrinting")) {
+                        var nodes = settings.getElementsByTagNameNS(settingsNs, feature);
+                        for (int i = 0; i < nodes.getLength(); i++) if (enabled((Element) nodes.item(i), settingsNs))
+                            return fallback("Mirrored margins or book-binding settings need manual layout review.");
+                    }
                 }
             }
-            var bodies = document.getElementsByTagNameNS(W, "body");
+            var bodies = document.getElementsByTagNameNS(ns, "body");
             if (bodies.getLength() != 1) return fallback("The document body could not be inspected.");
-            var nodes = ((Element) bodies.item(0)).getElementsByTagNameNS(W, "sectPr");
+            var nodes = ((Element) bodies.item(0)).getElementsByTagNameNS(ns, "sectPr");
             var sections = new ArrayList<Page>();
             for (int i = 0; i < nodes.getLength(); i++) {
                 Element section = (Element) nodes.item(i);
-                if (historical(section)) continue;
-                if (section.getParentNode() instanceof Element properties && W.equals(properties.getNamespaceURI())
+                if (historical(section, ns)) continue;
+                if (section.getParentNode() instanceof Element properties && ns.equals(properties.getNamespaceURI())
                         && "pPr".equals(properties.getLocalName())) {
-                    Element mark = child(properties, "rPr");
-                    if (mark != null && (child(mark, "del") != null || child(mark, "moveFrom") != null))
+                    Element mark = child(properties, ns, "rPr");
+                    if (mark != null && (child(mark, ns, "del") != null || child(mark, ns, "moveFrom") != null))
                         return fallback("Tracked deletion or movement of a section break needs manual layout review.");
                 }
                 if (sections.size() >= 1000) return fallback("The document has too many sections to inspect.");
-                Element size = child(section, "pgSz"), margins = child(section, "pgMar");
+                Element size = child(section, ns, "pgSz"), margins = child(section, ns, "pgMar");
                 if (size == null || margins == null) return fallback("Some sections have incomplete page size or margin settings.");
-                if (margins.hasAttributeNS(W, "gutter") && Integer.parseInt(margins.getAttributeNS(W, "gutter")) != 0)
+                if (margins.hasAttributeNS(ns, "gutter") && Ooxml.measureMm(margins.getAttributeNS(ns, "gutter"), BigDecimal.valueOf(600)).signum() != 0)
                     return fallback("Binding gutters need manual layout review.");
-                sections.add(new Page(mm(size, "w"), mm(size, "h"), mm(margins, "top"), mm(margins, "right"),
-                        mm(margins, "bottom"), mm(margins, "left")));
+                sections.add(new Page(mm(size, ns, "w"), mm(size, ns, "h"), mm(margins, ns, "top"), mm(margins, ns, "right"),
+                        mm(margins, ns, "bottom"), mm(margins, ns, "left")));
             }
             if (sections.isEmpty()) return fallback("No explicit page size and margins were found.");
             var warnings = new ArrayList<String>();
@@ -126,27 +130,24 @@ record SourceLayout(List<SourceLayout.Page> sections, List<String> warnings) {
         return builder.parse(new ByteArrayInputStream(xml));
     }
 
-    private static Element child(Element parent, String name) {
+    private static Element child(Element parent, String ns, String name) {
         for (Node node = parent.getFirstChild(); node != null; node = node.getNextSibling())
-            if (node instanceof Element element && W.equals(element.getNamespaceURI()) && name.equals(element.getLocalName())) return element;
+            if (node instanceof Element element && ns.equals(element.getNamespaceURI()) && name.equals(element.getLocalName())) return element;
         return null;
     }
 
-    private static boolean historical(Element section) {
+    private static boolean historical(Element section, String ns) {
         for (Node node = section.getParentNode(); node instanceof Element element; node = node.getParentNode())
-            if (W.equals(element.getNamespaceURI()) && List.of("sectPrChange", "del", "moveFrom").contains(element.getLocalName())) return true;
+            if (ns.equals(element.getNamespaceURI()) && List.of("sectPrChange", "del", "moveFrom").contains(element.getLocalName())) return true;
         return false;
     }
 
-    private static boolean enabled(Element element) {
-        return !List.of("0", "false", "off").contains(element.getAttributeNS(W, "val"));
+    private static boolean enabled(Element element, String ns) {
+        return !List.of("0", "false", "off").contains(element.getAttributeNS(ns, "val"));
     }
 
-    private static BigDecimal mm(Element element, String name) {
-        int twips = Integer.parseInt(element.getAttributeNS(W, name));
-        if (twips < 0 || twips > 34015) throw new IllegalArgumentException("Unsupported page measurement.");
-        return BigDecimal.valueOf(twips).multiply(new BigDecimal("25.4"))
-                .divide(BigDecimal.valueOf(1440), 3, RoundingMode.HALF_UP).stripTrailingZeros();
+    private static BigDecimal mm(Element element, String ns, String name) {
+        return Ooxml.measureMm(element.getAttributeNS(ns, name), BigDecimal.valueOf(600));
     }
 
     void save(Path output) throws IOException {

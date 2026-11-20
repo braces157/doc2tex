@@ -22,7 +22,6 @@ import org.w3c.dom.Node;
 
 /** Bounded original-text evidence and conservative, exact text/structure mappings. */
 final class ReviewEvidence {
-    private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final int PART_LIMIT = 2 * 1024 * 1024, TOTAL_LIMIT = 8 * 1024 * 1024;
     private static final int TEXT_LIMIT = 64 * 1024, PARAGRAPH_LIMIT = 500, FINDING_LIMIT = 100;
     private static final Pattern CAPTION = Pattern.compile("(?is)^\\s*(figure|fig\\.?|table)\\s+\\d.*");
@@ -73,14 +72,15 @@ final class ReviewEvidence {
                     var document = factory.newDocumentBuilder().parse(new ByteArrayInputStream(bytes));
                     boolean header = !part.getName().equals("word/document.xml");
                     Element root = document.getDocumentElement();
-                    if (root == null || !W.equals(root.getNamespaceURI()) || (header ? !List.of("hdr", "ftr").contains(root.getLocalName()) : !root.getLocalName().equals("document"))) {
+                    String ns = Ooxml.wordNamespace(root);
+                    if (ns == null || (header ? !List.of("hdr", "ftr").contains(root.getLocalName()) : !root.getLocalName().equals("document"))) {
                         limited = true; continue;
                     }
                     var values = new IdentityHashMap<Element, Text>();
-                    var nodes = document.getElementsByTagNameNS(W, "p");
+                    var nodes = document.getElementsByTagNameNS(ns, "p");
                     for (int index = 0; index < nodes.getLength(); index++) {
                         Element paragraph = (Element) nodes.item(index);
-                        String original = text(paragraph, true).strip(), accepted = text(paragraph, false).strip();
+                        String original = text(paragraph, ns, true).strip(), accepted = text(paragraph, ns, false).strip();
                         if (original.isBlank()) continue;
                         if (paragraphs.size() == PARAGRAPH_LIMIT || textRead >= TEXT_LIMIT) { limited = true; break; }
                         int remaining = Math.min(2048, TEXT_LIMIT - textRead);
@@ -92,26 +92,27 @@ final class ReviewEvidence {
                         if (!header && !accepted.isBlank()) occurrences.merge(normalize(accepted), 1, Integer::sum);
                         List<String> anchors = accepted.isBlank() || truncated ? List.of() : List.of(accepted);
                         if (header) add(originals, "headers", "Header or footer text", part.getName(), location, original, List.of(), "Word headers and footers are omitted from the converted body; no source location is assumed.");
-                        if (!header && hasCaptionStyle(paragraph) && CAPTION.matcher(original).matches())
+                        if (!header && hasCaptionStyle(paragraph, ns) && CAPTION.matcher(original).matches())
                             add(originals, "captions", "Caption already contains a number", part.getName(), location, original, anchors, null);
-                        if (!header && (has(paragraph, "ins") || has(paragraph, "del") || ancestor(paragraph, "ins") || ancestor(paragraph, "del")))
+                        if (!header && (has(paragraph, ns, "ins") || has(paragraph, ns, "del") || has(paragraph, ns, "moveFrom") || has(paragraph, ns, "moveTo")
+                                || ancestor(paragraph, ns, "ins") || ancestor(paragraph, ns, "del") || ancestor(paragraph, ns, "moveFrom") || ancestor(paragraph, ns, "moveTo")))
                             add(originals, "revisions", "Tracked changes in original paragraph", part.getName(), location, original, anchors, null);
                     }
                     if (!header) {
-                        var tables = document.getElementsByTagNameNS(W, "tbl");
+                        var tables = document.getElementsByTagNameNS(ns, "tbl");
                         for (int index = 0; index < tables.getLength(); index++) {
                             if (index == PARAGRAPH_LIMIT) { limited = true; break; }
                             Element table = (Element) tables.item(index);
-                            boolean merged = has(table, "vMerge");
-                            var spans = table.getElementsByTagNameNS(W, "gridSpan");
-                            for (int span = 0; span < spans.getLength(); span++) if (!"1".equals(((Element) spans.item(span)).getAttributeNS(W, "val"))) merged = true;
+                            boolean merged = has(table, ns, "vMerge");
+                            var spans = table.getElementsByTagNameNS(ns, "gridSpan");
+                            for (int span = 0; span < spans.getLength(); span++) if (!"1".equals(((Element) spans.item(span)).getAttributeNS(ns, "val"))) merged = true;
                             if (!merged) continue;
-                            var texts = new ArrayList<Text>(); var tableParagraphs = table.getElementsByTagNameNS(W, "p");
+                            var texts = new ArrayList<Text>(); var tableParagraphs = table.getElementsByTagNameNS(ns, "p");
                             for (int paragraph = 0; paragraph < tableParagraphs.getLength(); paragraph++) {
                                 Text value = values.get((Element) tableParagraphs.item(paragraph)); if (value != null) texts.add(value);
                             }
                             String original = String.join(" | ", texts.stream().map(Text::original).toList());
-                            boolean nested = has(table, "tbl");
+                            boolean nested = has(table, ns, "tbl");
                             List<String> anchors = nested ? List.of() : texts.stream().map(Text::accepted).filter(value -> !value.isBlank() && value.length() <= 2048).sorted(Comparator.comparingInt(String::length).reversed()).limit(3).toList();
                             add(originals, "merged", "Merged table cells", part.getName(), "table " + (index + 1), original.isBlank() ? "[No readable table text within inspection limits]" : original,
                                     anchors, nested ? "Nested table structure cannot be mapped reliably." : null);
@@ -196,26 +197,27 @@ final class ReviewEvidence {
         return new String(chars);
     }
 
-    private static String text(Node node, boolean original) {
-        if (node instanceof Element element && W.equals(element.getNamespaceURI())) {
-            if (!original && (element.getLocalName().equals("del") || element.getLocalName().equals("delText") || ancestor(element, "del"))) return "";
+    private static String text(Node node, String ns, boolean original) {
+        if (node instanceof Element element && ns.equals(element.getNamespaceURI())) {
+            if (!original && (element.getLocalName().equals("del") || element.getLocalName().equals("delText")
+                    || element.getLocalName().equals("moveFrom") || ancestor(element, ns, "del") || ancestor(element, ns, "moveFrom"))) return "";
             if (element.getLocalName().equals("t") || original && element.getLocalName().equals("delText")) return element.getTextContent();
             if (element.getLocalName().equals("tab") || element.getLocalName().equals("br")) return " ";
         }
         StringBuilder result = new StringBuilder();
-        for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) result.append(text(child, original));
+        for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) result.append(text(child, ns, original));
         return result.toString();
     }
 
-    private static boolean ancestor(Element element, String name) {
+    private static boolean ancestor(Element element, String ns, String name) {
         for (Node node = element.getParentNode(); node instanceof Element parent; node = parent.getParentNode())
-            if (W.equals(parent.getNamespaceURI()) && parent.getLocalName().equals(name)) return true;
+            if (ns.equals(parent.getNamespaceURI()) && parent.getLocalName().equals(name)) return true;
         return false;
     }
-    private static boolean has(Element element, String name) { return element.getElementsByTagNameNS(W, name).getLength() > 0; }
-    private static boolean hasCaptionStyle(Element paragraph) {
-        var styles = paragraph.getElementsByTagNameNS(W, "pStyle");
-        for (int index = 0; index < styles.getLength(); index++) if (((Element) styles.item(index)).getAttributeNS(W, "val").equalsIgnoreCase("caption")) return true;
+    private static boolean has(Element element, String ns, String name) { return element.getElementsByTagNameNS(ns, name).getLength() > 0; }
+    private static boolean hasCaptionStyle(Element paragraph, String ns) {
+        var styles = paragraph.getElementsByTagNameNS(ns, "pStyle");
+        for (int index = 0; index < styles.getLength(); index++) if (((Element) styles.item(index)).getAttributeNS(ns, "val").equalsIgnoreCase("caption")) return true;
         return false;
     }
     private static String normalize(String value) { return value.replaceAll("(?U)\\s+", " ").strip(); }

@@ -22,6 +22,7 @@ class CompilerDiagnosticsTest {
                 ! Undefined control sequence.
                 l.24 \\OtherCommand
                 error: ../../package/main.tex:33: Undefined control sequence
+                ! LaTeX Error: Cannot determine size of graphic in media/image1.emf (no BoundingBox).
                 """, 4, "FAILED", false, null);
         assertEquals(4, report.revision()); assertFalse(report.logTruncated());
         var unknown = report.items().getFirst();
@@ -32,6 +33,7 @@ class CompilerDiagnosticsTest {
         assertTrue(report.items().stream().anyMatch(item -> item.code().equals("missing-font") && item.raw().contains("(fontspec)")));
         assertTrue(report.items().stream().anyMatch(item -> item.code().equals("missing-file") && item.line() == 12));
         assertTrue(report.items().stream().anyMatch(item -> item.code().equals("missing-file") && item.line() == 13));
+        assertTrue(report.items().stream().anyMatch(item -> item.code().equals("unsupported-image") && item.severity().equals("error") && item.raw().contains("image1.emf")));
         assertTrue(report.items().stream().anyMatch(item -> item.file() == null && item.line() == null && item.raw().contains("l.24")));
         assertTrue(report.items().stream().anyMatch(item -> "../../package/main.tex".equals(item.file())));
     }

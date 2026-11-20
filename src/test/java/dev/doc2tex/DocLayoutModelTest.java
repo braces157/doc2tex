@@ -28,61 +28,65 @@ class DocLayoutModelTest {
         assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, 0, 0, 1.1f, 1, 0));
         assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, 0, Float.NaN, 1, 1, 0));
         assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, .5f, 0, .5f, 1, 0));
-        assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, 0, 0, 1, 1, -1));
+        assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", 0, 0, 0, 1, 1, -1));
+        assertEquals("inline_formula", new DocLayoutModel.Region("inline_formula", .8f, 0, 0, .5f, .5f, 0).label());
+        assertEquals("display_formula", new DocLayoutModel.Region("display_formula", .8f, 0, 0, .5f, .5f, 1).label());
     }
 
-    @Test void roundsClampsAndOrdersOriginalPixelBoxesWithoutReorderingSpatially() throws Exception {
+    @Test void roundsClampsAndOrdersOriginalPixelBoxesSpatially() throws Exception {
         var regions = DocLayoutModel.regions(new float[][] {
-                {22, .9f, 100.5f, 120, 200.5f, 140, 2},
-                {6, .8f, -4, 170, 240, 220, 1},
-                {17, .5f, 10, 10, 50, 30, 0},
-                {-1, .9f, 10, 10, 50, 30, 3},
-                {22, .9f, 50, 20, 40, 30, 4}
+                {2, .9f, 100.5f, 120, 200.5f, 140},
+                {11, .8f, -4, 170, 240, 220},
+                {0, .5f, 10, 10, 50, 30},
+                {-1, .9f, 10, 10, 50, 30},
+                {2, .9f, 50, 20, 40, 30}
         }, 200, 200);
-        assertEquals(List.of("doc_title", "text"), regions.stream().map(DocLayoutModel.Region::label).toList());
-        assertEquals(1, regions.getFirst().order());
-        assertEquals(0, regions.getFirst().left());
+        assertEquals(List.of("text", "doc_title"), regions.stream().map(DocLayoutModel.Region::label).toList());
+        assertEquals(List.of(0, 1), regions.stream().map(DocLayoutModel.Region::order).toList());
+        assertEquals(.5f, regions.getFirst().left());
         assertEquals(1, regions.getFirst().right());
-        assertEquals(1, regions.getFirst().bottom());
-        assertEquals(.5f, regions.get(1).left());
+        assertEquals(0, regions.get(1).left());
         assertEquals(1, regions.get(1).right());
-        assertTrue(regions.getFirst().top() > regions.get(1).top());
+        assertEquals(1, regions.get(1).bottom());
+        assertTrue(regions.getFirst().top() < regions.get(1).top());
     }
 
-    @Test void removesDuplicatesTinyBoxesReferencesAndInlineFormulasButKeepsVisualRegions() throws Exception {
+    @Test void removesDuplicatesTinyBoxesAndReferencesButKeepsVisualRegions() throws Exception {
         var regions = DocLayoutModel.regions(new float[][] {
-                {22, .95f, 10, 10, 90, 40, 0},
-                {22, .8f, 11, 11, 89, 39, 1},
-                {15, .9f, 20, 15, 40, 30, 2},
-                {18, .9f, 10, 50, 90, 80, 3},
-                {17, .9f, 10, 90, 15, 100, 4},
-                {14, .9f, 10, 10, 90, 40, 5},
-                {17, .9f, 10, 120, 90, 140, 6}
+                {2, .95f, 10, 10, 90, 40},
+                {2, .8f, 11, 11, 89, 39},
+                {10, .9f, 10, 50, 90, 80},
+                {0, .9f, 10, 90, 15, 100},
+                {1, .9f, 10, 10, 90, 40},
+                {0, .9f, 10, 120, 90, 140}
         }, 200, 200);
         assertEquals(List.of("text", "image", "paragraph_title"), regions.stream().map(DocLayoutModel.Region::label).toList());
-        assertEquals(List.of(0, 5, 6), regions.stream().map(DocLayoutModel.Region::order).toList());
+        assertEquals(List.of(0, 1, 2), regions.stream().map(DocLayoutModel.Region::order).toList());
     }
 
     @Test void keepsAParagraphTitleInsideALargerTextBlock() throws Exception {
         var regions = DocLayoutModel.regions(new float[][] {
-                {22, .9f, 10, 10, 180, 90, 0},
-                {17, .9f, 20, 14, 170, 30, 1}
+                {2, .9f, 10, 10, 180, 90},
+                {0, .9f, 20, 14, 170, 30}
         }, 200, 100);
         assertEquals(List.of("text", "paragraph_title"), regions.stream().map(DocLayoutModel.Region::label).toList());
     }
 
     @Test void dropsHugeLandscapeImageWithoutLosingRealTextOrSoleImage() throws Exception {
-        float[] image = {14, .9f, 0, 0, 190, 95, 0};
-        var regions = DocLayoutModel.regions(new float[][] {image, {22, .9f, 10, 10, 180, 30, 1}}, 200, 100);
+        float[] image = {1, .9f, 0, 0, 190, 95};
+        var regions = DocLayoutModel.regions(new float[][] {image, {2, .9f, 10, 10, 180, 30}}, 200, 100);
         assertEquals(List.of("text"), regions.stream().map(DocLayoutModel.Region::label).toList());
         assertEquals("image", DocLayoutModel.regions(new float[][] {image}, 200, 100).getFirst().label());
     }
 
-    @Test void malformedModelOutputFailsExplicitly() {
-        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{22, .9f}}, 200, 200));
-        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{22, .9f, 0, 0, Float.NaN, 20, 0}}, 200, 200));
-        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{25, .9f, 0, 0, 20, 20, 0}}, 200, 200));
-        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{22, .9f, 0, 0, 20, 20, 1.5f}}, 200, 200));
+    @Test void respectsDetectionCountAndRejectsMalformedModelOutput() throws Exception {
+        var trimmed = DocLayoutModel.regions(new float[][] {{2, .9f, 10, 10, 90, 40}, {99, 99, 0, 0, 0, 0}}, 1, 200, 200);
+        assertEquals(List.of("text"), trimmed.stream().map(DocLayoutModel.Region::label).toList());
+        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{2, .9f}}, 200, 200));
+        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{2, .9f, 0, 0, Float.NaN, 20}}, 200, 200));
+        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{23, .9f, 0, 0, 20, 20}}, 200, 200));
+        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{2, .9f, 0, 0, 20, 20}}, 2, 200, 200));
+        assertThrows(IOException.class, () -> DocLayoutModel.regions(new float[][] {{2, .9f, 0, 0, 20, 20}}, -1, 200, 200));
     }
 
     @Test @org.junit.jupiter.api.Tag("ai") void actualCpuModelMatchesSourcePageProbeAndSurvivesInterruptedCall() throws Exception {
@@ -97,13 +101,12 @@ class DocLayoutModelTest {
             try { assertThrows(InterruptedException.class, () -> detector.detect(image, 30)); }
             finally { Thread.interrupted(); }
             var regions = detector.detect(image, 30);
-            var text = regions.stream().filter(region -> region.label().equals("text")).findFirst().orElseThrow();
-            assertEquals(.110f, text.left(), .025f);
-            assertEquals(.046f / .773f, text.top(), .025f);
-            assertEquals(.466f, text.right(), .025f);
-            assertEquals(.062f / .773f, text.bottom(), .025f);
-            assertTrue(text.confidence() > .5f);
-            assertTrue(regions.stream().anyMatch(region -> region.label().equals("number") && region.top() > .8f));
+            var topLine = regions.stream().filter(region -> region.label().equals("header")).findFirst().orElseThrow();
+            assertEquals(.110f, topLine.left(), .025f);
+            assertEquals(.046f / .773f, topLine.top(), .025f);
+            assertEquals(.466f, topLine.right(), .025f);
+            assertEquals(.062f / .773f, topLine.bottom(), .025f);
+            assertTrue(topLine.confidence() > .5f);
             assertEquals(regions.stream().map(DocLayoutModel.Region::order).sorted().toList(), regions.stream().map(DocLayoutModel.Region::order).toList());
         }
     }

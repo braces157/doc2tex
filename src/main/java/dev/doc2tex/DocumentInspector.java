@@ -30,9 +30,6 @@ class DocumentInspector {
             this(elements, findings, compilerWarnings, scripts, scope, null, List.of(), List.of(), List.of(), false, "");
         }
     }
-    private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-    private static final String M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
-
     static void detectScripts(String value, Set<String> scripts) {
         value.codePoints().filter(Character::isLetter).forEach(point -> {
             var script = Character.UnicodeScript.of(point);
@@ -66,7 +63,17 @@ class DocumentInspector {
                 }
                 if (name.startsWith("word/charts/")) flags.add("charts");
                 if (name.startsWith("word/embeddings/")) flags.add("objects");
-                if (name.equals("word/comments.xml")) flags.add("comments");
+                if (name.equals("word/comments.xml")) {
+                    // Pandoc's default DOCX writer can emit an empty comments part; only flag actual comments.
+                    if (entry.getSize() > 8 * 1024 * 1024) flags.add("comments");
+                    else try (InputStream stream = zip.getInputStream(entry)) {
+                        parse(stream, new DefaultHandler() {
+                            @Override public void startElement(String uri, String local, String qualified, Attributes attributes) {
+                                if (Ooxml.isWord(uri) && local.equals("comment")) flags.add("comments");
+                            }
+                        });
+                    }
+                }
                 if (name.equals("word/document.xml") || name.equals("word/footnotes.xml") || name.equals("word/endnotes.xml")) {
                     if (entry.getSize() > 8 * 1024 * 1024) { flags.add("inspection_limit"); continue; }
                     try (InputStream stream = zip.getInputStream(entry)) {
@@ -135,34 +142,34 @@ class DocumentInspector {
         }
 
         @Override public void startElement(String uri, String local, String qualified, Attributes attributes) {
-            if (W.equals(uri)) {
+            if (Ooxml.isWord(uri)) {
                 if (local.equals("p")) { caption = false; paragraphText.setLength(0); }
                 if (local.equals("t")) text = true;
                 if (!body) return;
                 if (local.equals("tbl")) counts.merge("tables", 1, Integer::sum);
                 if (local.equals("hyperlink")) counts.merge("links", 1, Integer::sum);
                 if (local.equals("pStyle")) {
-                    String style = attributes.getValue(W, "val");
+                    String style = attributes.getValue(uri, "val");
                     if (style != null && style.toLowerCase(Locale.ROOT).startsWith("heading")) counts.merge("headings", 1, Integer::sum);
                     if (style != null && style.equalsIgnoreCase("caption")) caption = true;
                 }
                 if (local.equals("footnote") || local.equals("endnote")) {
-                    String id = attributes.getValue(W, "id");
+                    String id = attributes.getValue(uri, "id");
                     if (id != null && !id.startsWith("-") && !id.equals("0")) counts.merge("footnotes", 1, Integer::sum);
                 }
-                if (local.equals("ins") || local.equals("del")) flags.add("revisions");
-                if (local.equals("vMerge") || (local.equals("gridSpan") && !"1".equals(attributes.getValue(W, "val")))) flags.add("merged");
+                if (local.equals("ins") || local.equals("del") || local.equals("moveFrom") || local.equals("moveTo")) flags.add("revisions");
+                if (local.equals("vMerge") || (local.equals("gridSpan") && !"1".equals(attributes.getValue(uri, "val")))) flags.add("merged");
                 if (local.equals("txbxContent")) flags.add("textboxes");
                 if (local.equals("object")) flags.add("objects");
                 if (local.equals("altChunk")) flags.add("altchunk");
-                if (local.equals("cols") && attributes.getValue(W, "num") != null && !"1".equals(attributes.getValue(W, "num"))) flags.add("columns");
+                if (local.equals("cols") && attributes.getValue(uri, "num") != null && !"1".equals(attributes.getValue(uri, "num"))) flags.add("columns");
             }
-            if (body && M.equals(uri) && local.equals("oMath")) counts.merge("equations", 1, Integer::sum);
+            if (body && Ooxml.isMath(uri) && local.equals("oMath")) counts.merge("equations", 1, Integer::sum);
         }
 
         @Override public void endElement(String uri, String local, String qualified) {
-            if (W.equals(uri) && local.equals("t")) text = false;
-            if (body && W.equals(uri) && local.equals("p") && caption
+            if (Ooxml.isWord(uri) && local.equals("t")) text = false;
+            if (body && Ooxml.isWord(uri) && local.equals("p") && caption
                     && paragraphText.toString().matches("(?is)^\\s*(figure|fig\\.?|table)\\s+\\d.*")) flags.add("captions");
         }
 

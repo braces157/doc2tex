@@ -112,7 +112,7 @@ final class AiLayoutService {
                 var regions = detector.detect(image, remaining(deadline));
                 pages.add(new AiLayoutReport.Page(index + 1, regions));
                 for (var region : regions) {
-                    if (!region.label().equals("paragraph_title") || region.confidence() < .8f) continue;
+                    if (!region.label().equals("paragraph_title") || region.confidence() < AiLayoutReport.MIN_HEADING_CONFIDENCE) continue;
                     String text = regionText(page, region);
                     var paragraph = candidates.get(WordLayout.key(text));
                     if (paragraph == null) continue;
@@ -129,7 +129,7 @@ final class AiLayoutService {
                     ? "The source uses two columns with tables. Automatic columns were skipped to preserve editable tables."
                     : "The source requests two columns, but visual evidence did not confirm both columns on every inspected page. Column formatting was left unchanged.");
             if (columns && count < document.getNumberOfPages()) { columns = false; warnings.add("Two-column formatting was left unchanged because some source pages were outside the inspection limit."); }
-            return new AiLayoutReport(AiLayoutReport.Status.ANALYZED, "PP-DocLayoutV3", document.getNumberOfPages(), pages,
+            return new AiLayoutReport(AiLayoutReport.Status.ANALYZED, DocLayoutModel.MODEL_NAME, document.getNumberOfPages(), pages,
                     headings.values().stream().limit(100).toList(), List.of(), columns, 0, warnings);
         } finally { inferenceSlot.release(); }
     }
