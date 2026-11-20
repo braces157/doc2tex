@@ -74,6 +74,9 @@ final class CompilerDiagnostics {
                     && (content.contains("not found") || content.contains("cannot be found") || content.contains("font-not-found"))) {
                 code = "missing-font"; title = "Font unavailable";
                 explanation = "Check that the named font is available and that the source uses the intended font name or bundled font path.";
+            } else if (content.contains("cannot determine size of graphic") || content.contains("unknown graphics extension") || content.contains("no boundingbox")) {
+                code = "unsupported-image"; title = "Unsupported image format";
+                explanation = "The PDF compiler cannot embed this image format (such as EMF, WMF, or SVG). Convert the image to PNG or JPEG, or remove or replace the \\includegraphics line.";
             } else if (content.contains("unable to load picture") || content.contains("file") && (content.contains("not found") || content.contains("cannot find") || content.contains("can't find"))) {
                 code = "missing-file"; title = "File or image unavailable";
                 explanation = "Check the asset filename and relative path in the source and ensure the file is included in this project.";

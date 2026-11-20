@@ -64,6 +64,45 @@ class SourceLayoutTest {
         return SourceLayout.inspect(file);
     }
 
+    @Test void inspectsStrictOoxmlDocumentsAndIgnoresEmptyCommentsPart() throws Exception {
+        String strictXml = """
+                <w:document xmlns:w="http://purl.oclc.org/ooxml/wordprocessingml/main"
+                  xmlns:m="http://purl.oclc.org/ooxml/officeDocument/math"><w:body>
+                  <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>1. Strict Section</w:t></w:r></w:p>
+                  <w:p><w:r><w:t>Equation </w:t></w:r><m:oMath><m:r><m:t>E=mc^2</m:t></m:r></m:oMath></w:p>
+                  <w:sectPr><w:pgSz w:w="612pt" w:h="792pt"/><w:pgMar w:top="54pt" w:right="44.65pt" w:bottom="72pt" w:left="44.65pt" w:gutter="0pt"/><w:cols w:num="2" w:space="18pt"/></w:sectPr>
+                </w:body></w:document>""";
+        var bytes = new ByteArrayOutputStream();
+        try (var output = new ZipOutputStream(bytes); var input = new ZipInputStream(new ByteArrayInputStream(SampleDocument.create()))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                output.putNextEntry(new ZipEntry(entry.getName()));
+                if (entry.getName().equals("word/document.xml")) output.write(strictXml.getBytes(StandardCharsets.UTF_8));
+                else input.transferTo(output);
+                output.closeEntry();
+            }
+            output.putNextEntry(new ZipEntry("word/comments.xml"));
+            output.write("<w:comments xmlns:w=\"http://purl.oclc.org/ooxml/wordprocessingml/main\"/>".getBytes(StandardCharsets.UTF_8));
+            output.closeEntry();
+        }
+        Path file = directory.resolve("strict.docx");
+        Files.write(file, bytes.toByteArray());
+        var layout = SourceLayout.inspect(file);
+        assertEquals(1, layout.sections().size());
+        assertTrue(layout.warnings().isEmpty());
+        assertEquals(new BigDecimal("215.9"), layout.sections().getFirst().widthMm());
+        var wordLayout = WordLayout.read(file);
+        assertTrue(wordLayout.uniformTwoColumns());
+        var review = new DocumentInspector().review(file, null);
+        assertEquals(1, review.elements().get("headings"));
+        assertEquals(1, review.elements().get("equations"));
+        assertTrue(review.findings().stream().anyMatch(f -> f.code().equals("columns")));
+        assertTrue(review.findings().stream().noneMatch(f -> f.code().equals("comments")));
+        var evidence = ReviewEvidence.inspect(file, "1. Strict Section", 0);
+        assertFalse(evidence.truncated());
+        assertFalse(evidence.paragraphs().isEmpty());
+    }
+
     @Test void detectsLandscapeAndFourIndependentMarginsAndRoundTripsItsReport() throws Exception {
         var report = inspect(section(15840, 12240, 720, 1080, 1440, 1800), null);
         var page = report.sections().getFirst();
@@ -117,7 +156,7 @@ class SourceLayoutTest {
     }
 
     @Test void refusesExternalEntitiesAndOversizedXml() throws Exception {
-        Path secret = directory.resolve("secret.txt"); Files.writeString(secret, section(12240, 15840, 1440, 1440, 1440, 1440));
+        Path secret = directory.resolve("secret.txt"); Files.writeString(secret, "SECRET_LAYOUT_SENTINEL");
         var bytes = new ByteArrayOutputStream();
         try (var zip = new ZipOutputStream(bytes)) {
             zip.putNextEntry(new ZipEntry("word/document.xml"));
@@ -127,7 +166,7 @@ class SourceLayoutTest {
         }
         Path file = directory.resolve("external.docx"); Files.write(file, bytes.toByteArray());
         var report = SourceLayout.inspect(file);
-        assertTrue(report.sections().isEmpty(), "External entities must never supply page settings");
+        assertTrue(report.sections().isEmpty()); assertFalse(report.toString().contains("SECRET_LAYOUT_SENTINEL"));
         report = inspect(" ".repeat(8 * 1024 * 1024), null);
         assertTrue(report.sections().isEmpty()); assertTrue(report.warnings().getFirst().contains("safely"));
     }

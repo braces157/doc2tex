@@ -31,7 +31,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Normalizes a conversion copy only; explicit field relationships remain distinct from prose. */
 final class WordReferenceSupport {
-    private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final int XML_LIMIT = 8 * 1024 * 1024, FIELD_LIMIT = 200;
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Pattern REF = Pattern.compile("(?i)^REF\\s+([^\\s]+)(.*)$");
@@ -64,9 +63,10 @@ final class WordReferenceSupport {
             factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, ""); factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             factory.setAttribute("jdk.xml.maxElementDepth", "128"); factory.setXIncludeAware(false); factory.setExpandEntityReferences(false);
             Document document = factory.newDocumentBuilder().parse(new ByteArrayInputStream(xml));
-            if (!W.equals(document.getDocumentElement().getNamespaceURI())) throw new IOException("Unsupported Word document namespace.");
-            boolean changed = normalizeSimpleFields(document);
-            changed |= collect(document, bookmarks, fields, warnings);
+            String ns = Ooxml.wordNamespace(document.getDocumentElement());
+            if (ns == null) throw new IOException("Unsupported Word document namespace.");
+            boolean changed = normalizeSimpleFields(document, ns);
+            changed |= collect(document, ns, bookmarks, fields, warnings);
             if (changed) {
                 var transformerFactory = TransformerFactory.newInstance(); transformerFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
                 transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, ""); transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
@@ -118,44 +118,44 @@ final class WordReferenceSupport {
         command.add("--include-in-header=caption-references.tex"); command.add("--lua-filter=caption-references.lua");
     }
 
-    private static boolean normalizeSimpleFields(Document document) {
-        var simple = document.getElementsByTagNameNS(W, "fldSimple"); boolean changed = simple.getLength() > 0;
+    private static boolean normalizeSimpleFields(Document document, String ns) {
+        var simple = document.getElementsByTagNameNS(ns, "fldSimple"); boolean changed = simple.getLength() > 0;
         if (simple.getLength() > 2000) throw new IllegalArgumentException("Too many simple Word fields to normalize safely.");
         for (int index = simple.getLength() - 1; index >= 0; index--) {
             Element field = (Element) simple.item(index); Node parent = field.getParentNode();
-            parent.insertBefore(fieldRun(document, "begin", null), field);
-            parent.insertBefore(fieldRun(document, null, field.getAttributeNS(W, "instr")), field);
-            parent.insertBefore(fieldRun(document, "separate", null), field);
+            parent.insertBefore(fieldRun(document, ns, "begin", null), field);
+            parent.insertBefore(fieldRun(document, ns, null, field.getAttributeNS(ns, "instr")), field);
+            parent.insertBefore(fieldRun(document, ns, "separate", null), field);
             for (Node child = field.getFirstChild(); child != null; child = child.getNextSibling()) parent.insertBefore(child.cloneNode(true), field);
-            parent.insertBefore(fieldRun(document, "end", null), field); parent.removeChild(field);
+            parent.insertBefore(fieldRun(document, ns, "end", null), field); parent.removeChild(field);
         }
         return changed;
     }
 
-    private static Element fieldRun(Document document, String type, String instruction) {
-        Element run = document.createElementNS(W, "w:r"), value = document.createElementNS(W, type == null ? "w:instrText" : "w:fldChar");
+    private static Element fieldRun(Document document, String ns, String type, String instruction) {
+        Element run = document.createElementNS(ns, "w:r"), value = document.createElementNS(ns, type == null ? "w:instrText" : "w:fldChar");
         if (type == null) { value.setAttributeNS(XMLConstants.XML_NS_URI, "xml:space", "preserve"); value.setTextContent(instruction); }
-        else value.setAttributeNS(W, "w:fldCharType", type);
+        else value.setAttributeNS(ns, "w:fldCharType", type);
         run.appendChild(value); return run;
     }
 
-    private static boolean collect(Document document, Map<String, Integer> bookmarks, List<Field> fields, List<String> warnings) {
+    private static boolean collect(Document document, String ns, Map<String, Integer> bookmarks, List<Field> fields, List<String> warnings) {
         var nodes = new ArrayDeque<Node>(); var stack = new ArrayDeque<Frame>(); var completed = new ArrayList<Frame>();
         var titles = new java.util.HashSet<String>(); nodes.push(document.getDocumentElement()); boolean boundaries = true;
         while (!nodes.isEmpty()) {
             Node node = nodes.pop();
-            if (node instanceof Element element && !stack.isEmpty() && stack.peek().result && !W.equals(element.getNamespaceURI())) stack.peek().complexResult = true;
-            if (node instanceof Element element && W.equals(element.getNamespaceURI())) {
+            if (node instanceof Element element && !stack.isEmpty() && stack.peek().result && !ns.equals(element.getNamespaceURI())) stack.peek().complexResult = true;
+            if (node instanceof Element element && ns.equals(element.getNamespaceURI())) {
                 String name = element.getLocalName();
                 if (!stack.isEmpty() && stack.peek().result && List.of("drawing", "pict", "object", "br", "tab", "sym", "delText").contains(name)) stack.peek().complexResult = true;
-                if (name.equals("hyperlink")) titles.add(element.getAttributeNS(W, "tooltip"));
+                if (name.equals("hyperlink")) titles.add(element.getAttributeNS(ns, "tooltip"));
                 if (name.equals("bookmarkStart")) {
-                    String bookmark = element.getAttributeNS(W, "name");
+                    String bookmark = element.getAttributeNS(ns, "name");
                     if ((bookmarks.containsKey(bookmark) || bookmarks.size() < 1000) && validBookmark(bookmark)) bookmarks.merge(bookmark, 1, Integer::sum);
                     else warn(warnings, "Some Word bookmark names or counts exceed supported limits; verify their references manually.");
                 }
                 if (name.equals("fldChar")) {
-                    String type = element.getAttributeNS(W, "fldCharType");
+                    String type = element.getAttributeNS(ns, "fldCharType");
                     if (type.equals("begin")) { if (!stack.isEmpty()) stack.peek().nested = true; var frame = new Frame(); frame.nested = !stack.isEmpty(); frame.begin = element.getParentNode(); stack.push(frame); }
                     else if (type.equals("separate")) { if (stack.isEmpty()) boundaries = false; else { stack.peek().result = true; stack.peek().separate = element.getParentNode(); } }
                     else if (type.equals("end")) { if (stack.isEmpty()) boundaries = false; else { var frame = stack.pop(); frame.end = element.getParentNode(); completed.add(frame); } }
@@ -169,7 +169,7 @@ final class WordReferenceSupport {
             warn(warnings, "Word field boundaries are incomplete; verify field results manually.");
         }
         boolean changed = false;
-        for (var frame : completed) changed |= addField(frame, fields, warnings, titles, boundaries);
+        for (var frame : completed) changed |= addField(frame, ns, fields, warnings, titles, boundaries);
         fields.replaceAll(field -> field.supported() && bookmarks.getOrDefault(field.target(), 0) != 1
                 ? new Field(field.id(), field.target(), field.cached(), false, "The Word bookmark target is missing or duplicated.") : field);
         return changed;
@@ -185,7 +185,7 @@ final class WordReferenceSupport {
         }
     }
 
-    private static boolean addField(Frame frame, List<Field> fields, List<String> warnings, java.util.Set<String> titles, boolean boundaries) {
+    private static boolean addField(Frame frame, String ns, List<Field> fields, List<String> warnings, java.util.Set<String> titles, boolean boundaries) {
         String instruction = frame.instruction.toString().strip(), cached = frame.cached.toString().strip();
         String command = instruction.split("\\s+", 2)[0].toUpperCase(Locale.ROOT);
         if (List.of("SEQ", "HYPERLINK").contains(command)) return false;
@@ -206,31 +206,31 @@ final class WordReferenceSupport {
         }
         String marker = "doc2tex-ref-field-" + (fields.size() + 1);
         while (titles.contains(marker)) marker += "-x";
-        boolean changed = boundaries && !frame.nested && rewrite(frame, target, marker);
+        boolean changed = boundaries && !frame.nested && rewrite(frame, ns, target, marker);
         if (!changed) { marker = ""; supported = false; reason = "The Word field structure cannot be rewritten safely; compare its cached text manually."; }
         titles.add(marker); fields.add(new Field(marker, target, cached, supported, reason));
         return changed;
     }
 
-    private static boolean rewrite(Frame frame, String target, String marker) {
+    private static boolean rewrite(Frame frame, String ns, String target, String marker) {
         if (frame.begin == null || frame.separate == null || frame.end == null) return false;
-        if (!controlRun(frame.begin) || !controlRun(frame.separate) || !controlRun(frame.end)) return false;
+        if (!controlRun(frame.begin, ns) || !controlRun(frame.separate, ns) || !controlRun(frame.end, ns)) return false;
         Node parent = frame.begin.getParentNode();
-        if (!(parent instanceof Element paragraph) || !W.equals(paragraph.getNamespaceURI()) || !paragraph.getLocalName().equals("p")
+        if (!(parent instanceof Element paragraph) || !ns.equals(paragraph.getNamespaceURI()) || !paragraph.getLocalName().equals("p")
                 || frame.separate.getParentNode() != parent || frame.end.getParentNode() != parent) return false;
         var result = new ArrayList<Node>(); boolean afterSeparator = false, foundEnd = false;
         for (Node node = frame.begin; node != null; node = node.getNextSibling()) {
             if (node == frame.end) { foundEnd = true; break; }
             if (node == frame.separate) { afterSeparator = true; continue; }
             if (afterSeparator) {
-                if (!(node instanceof Element run) || !W.equals(run.getNamespaceURI()) || !run.getLocalName().equals("r")) return false;
+                if (!(node instanceof Element run) || !ns.equals(run.getNamespaceURI()) || !run.getLocalName().equals("r")) return false;
                 result.add(node.cloneNode(true));
-            } else if (node instanceof Element ? !controlRun(node) : node.getNodeType() != Node.TEXT_NODE || !node.getTextContent().isBlank()) return false;
+            } else if (node instanceof Element ? !controlRun(node, ns) : node.getNodeType() != Node.TEXT_NODE || !node.getTextContent().isBlank()) return false;
         }
         if (!foundEnd) return false;
         Document document = paragraph.getOwnerDocument();
         if (validBookmark(target)) {
-            Element link = document.createElementNS(W, "w:hyperlink"); link.setAttributeNS(W, "w:anchor", target); link.setAttributeNS(W, "w:tooltip", marker);
+            Element link = document.createElementNS(ns, "w:hyperlink"); link.setAttributeNS(ns, "w:anchor", target); link.setAttributeNS(ns, "w:tooltip", marker);
             result.forEach(link::appendChild); parent.insertBefore(link, frame.begin);
         } else for (Node node : result) parent.insertBefore(node, frame.begin);
         Node current = frame.begin;
@@ -238,10 +238,10 @@ final class WordReferenceSupport {
         return true;
     }
     private static boolean validBookmark(String name) { return name.matches("[\\p{L}_][\\p{L}\\p{N}_.-]{0,127}"); }
-    private static boolean controlRun(Node node) {
-        if (!(node instanceof Element run) || !W.equals(run.getNamespaceURI()) || !run.getLocalName().equals("r")) return false;
+    private static boolean controlRun(Node node, String ns) {
+        if (!(node instanceof Element run) || !ns.equals(run.getNamespaceURI()) || !run.getLocalName().equals("r")) return false;
         for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) if (child instanceof Element element
-                && (!W.equals(element.getNamespaceURI()) || !List.of("rPr", "fldChar", "instrText").contains(element.getLocalName()))) return false;
+                && (!ns.equals(element.getNamespaceURI()) || !List.of("rPr", "fldChar", "instrText").contains(element.getLocalName()))) return false;
         return true;
     }
     private static void warn(List<String> warnings, String message) { if (warnings.size() < 32 && !warnings.contains(message)) warnings.add(message); }
