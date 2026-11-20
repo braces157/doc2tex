@@ -7,7 +7,7 @@ import { bracketMatching, defaultHighlightStyle, indentUnit, StreamLanguage, syn
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
-import { ArrowCounterClockwise, ArrowClockwise, ArrowElbowDownLeft, BracketsCurly, CaretDown, Code, List, MagnifyingGlass, Question, TextB, TextItalic, TextIndent, TextOutdent, X } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, ArrowClockwise, ArrowElbowDownLeft, CaretDown, Code, List, MagnifyingGlass, Question, TextB, TextItalic, TextIndent, TextOutdent, X } from '@phosphor-icons/react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu'
 import { documentHeadings, insertLatex, latexCompletions, latexTemplates } from './latexEditing'
 import type { LatexTemplate } from './latexEditing'
@@ -80,14 +80,14 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
         EditorView.contentAttributes.of({ 'aria-label': 'LaTeX source editor', 'aria-describedby': helpId,
           'aria-disabled': String(disabled), spellcheck: 'false' })]),
       wrapping.of(wrap ? EditorView.lineWrapping : []),
-      EditorView.theme({ '&': { height: '100%', fontSize: '13px' }, '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-mono)', lineHeight: '25px' },
-        '.cm-content': { padding: '18px 0', color: '#3f4e35' }, '.cm-line': { padding: '0 16px' },
-        '.cm-gutters': { backgroundColor: '#fafcf7', color: '#7d8a71', borderRight: '1px solid #edf1e6', minWidth: '44px' },
-        '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: '#f3f7ec' },
-        '&.cm-focused': { outline: '2px solid #a1b981', outlineOffset: '-2px' },
-        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: '#dceacb' },
-        '.cm-matchingBracket': { backgroundColor: '#dfedce', outline: '1px solid #a1b981' },
-        '.cm-nonmatchingBracket': { backgroundColor: '#f7e6dd', outline: '1px solid #b98267' } }),
+      EditorView.theme({ '&': { height: '100%', fontSize: '13px' }, '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-mono)', lineHeight: '22px' },
+        '.cm-content': { padding: '14px 0', color: '#181715', caretColor: '#1f4d3a' }, '.cm-line': { padding: '0 16px' },
+        '.cm-gutters': { backgroundColor: '#f5f3ee', color: '#9b958b', borderRight: '1px solid #e2ddd3', minWidth: '48px' },
+        '.cm-activeLine': { backgroundColor: '#f8f6f2' }, '.cm-activeLineGutter': { backgroundColor: '#eaf2ee', color: '#1f4d3a' },
+        '&.cm-focused': { outline: '2px solid #1f4d3a', outlineOffset: '-2px' },
+        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: '#d5e6de' },
+        '.cm-matchingBracket': { backgroundColor: '#d5e6de', outline: '1px solid #6b9e87' },
+        '.cm-nonmatchingBracket': { backgroundColor: '#fee2e2', outline: '1px solid #f87171' } }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString())
         if (update.docChanged || update.selectionSet) publish(update.view)
@@ -123,6 +123,7 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
     const line = editor.state.doc.line(number)
     editor.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: 'center' }) })
     editor.focus()
+    setLineInput(String(number))
     return number
   }
   useImperativeHandle(editorRef, () => ({ goToLine, focus: () => view.current?.focus(), isComposing: () => view.current?.composing ?? false,
@@ -140,7 +141,6 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
   }
 
   return <div className="latex-editor-shell">
-    <div className="latex-editor-filebar"><span><BracketsCurly size={16} /><strong>main.tex</strong><span>LaTeX source</span></span><button aria-expanded={showGuide} aria-controls={guideId} onClick={() => setShowGuide(value => !value)}><Question size={16} />Editing guide</button></div>
     <div className="latex-editor-tools" role="group" aria-label="LaTeX editing tools">
       <div className="latex-tool-group">
         <button aria-label="Undo" title={`Undo (${commandKey} Z)`} disabled={disabled || !status.undo} onClick={() => command(undo)}><ArrowCounterClockwise size={16} /></button>
@@ -167,6 +167,7 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
     <div className="latex-editor-navigation">
       <button aria-expanded={showOutline} aria-controls={outlineId} onClick={() => setShowOutline(value => !value)}><List size={15} />Outline</button>
       <button aria-pressed={wrap} onClick={() => setWrap(value => !value)}><ArrowElbowDownLeft size={15} />Wrap</button>
+      <button aria-expanded={showGuide} aria-controls={guideId} onClick={() => setShowGuide(value => !value)}><Question size={15} />Editing guide</button>
       <form onSubmit={event => { event.preventDefault(); setLineInput(String(goToLine(Number(lineInput)))) }}>
         <label>Line<input type="number" step="any" aria-label="Go to line" value={lineInput} onChange={event => setLineInput(event.target.value)} /></label><button type="submit">Go</button>
       </form>
@@ -176,7 +177,6 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
       {showOutline && <nav id={outlineId} className="latex-editor-outline" aria-label="Document outline"><strong>Document outline</strong>{outline.items.length ? <ol>{outline.items.map(heading => <li key={heading.line} className={heading.level > 2 ? 'is-subheading' : undefined}><button title={heading.title} aria-current={heading.line === activeHeading ? 'location' : undefined} onClick={() => goToLine(heading.line)}><span>{heading.title}</span><small>{heading.line}</small></button></li>)}</ol> : <p>Add a section with Insert. Your headings will appear here.</p>}{outline.truncated && <p>Showing the first 200 headings.</p>}</nav>}
       <div ref={host} className="latex-editor-host" />
     </div>
-    <div className="latex-editor-position"><span>Line {status.line} of {status.lines}</span><span>Col {status.column}{status.selected > 0 && ` · ${status.selected} selected`}</span><span className="latex-editor-language">UTF-8 · LaTeX</span></div>
-    <p id={helpId} className="latex-editor-help">Tab moves focus. {commandKey} B / I: bold / italic. {commandKey} /: comment. Type \ for commands.</p>
+    <div className="latex-editor-position"><span className="latex-editor-coords"><span>Line {status.line} of {status.lines}</span><span>· Col {status.column}{status.selected > 0 && ` · ${status.selected} selected`}</span></span><span id={helpId} className="latex-editor-help">Tab moves focus · {commandKey} B / I: bold / italic · {commandKey} /: comment · \ for commands</span></div>
   </div>
 }

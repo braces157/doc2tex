@@ -153,6 +153,6 @@ test('a delayed active-document restore respects navigation back to a new conver
   await page.getByRole('button', { name: 'New conversion', exact: true }).click()
   release()
   await expect(editor(page)).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'A fresh page starts here.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Drop a Word document here' })).toBeVisible()
   expect(await page.evaluate(() => sessionStorage.getItem('doc2tex:active-job'))).toBeNull()
 })

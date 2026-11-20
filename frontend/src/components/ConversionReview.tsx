@@ -10,13 +10,26 @@ interface Props {
 }
 
 export function ConversionReview({ review, job, dirty, canDecide, saving, error, onRetry, onDecide, onCompare, onNavigate, onCaptionRepairs }: Props) {
-  if (!job) return <div className="review-empty"><div className="review-empty-icon"><CheckCircle size={32} weight="light" /></div><h3>Know what made the journey.</h3><p>After conversion, see the document features we detected and the details worth reviewing.</p><div className="review-checklist"><span>Document structure</span><span>Equations & images</span><span>Fonts & compiler warnings</span></div></div>
-  if (!review) return error ? <div className="review-empty" role="alert"><p>Could not load conversion review: {error}</p><button onClick={onRetry}>Retry conversion review</button></div> : <div className="review-empty" aria-busy="true">Inspecting your document…</div>
+  if (!job) return <div className="review-empty"><div className="review-empty-icon"><CheckCircle size={32} weight="light" /></div><h3>No review yet</h3><p>After conversion, this tab lists detected document features and any items that need a manual check.</p><div className="review-checklist"><span>Document structure</span><span>Equations & images</span><span>Fonts & compiler warnings</span></div></div>
+  if (!review) return error ? <div className="review-empty" role="alert"><p>Could not load conversion review: {error}</p><button onClick={onRetry}>Retry conversion review</button></div> : <div className="review-empty" aria-busy="true">Analyzing document…</div>
   const warnings = review.findings.filter(finding => finding.severity === 'warning').length + review.compilerWarnings.length
   const items = review.items ?? [], decisions = review.decisions ?? []
   return <div className="review-content">
-    <div className="review-summary"><div><span className="ui-eyebrow">CONVERSION REVIEW</span><h3>{warnings ? 'A few details to check.' : 'Ready for your final read.'}</h3></div><Badge variant="outline" className={warnings ? 'review-warning-badge' : 'review-clear-badge'}>{warnings ? `${warnings} to review` : 'No flags detected'}</Badge></div>
+    <div className="review-summary"><div><span className="ui-eyebrow">CONVERSION REVIEW</span><h3>{warnings ? 'Some items need review' : 'No issues detected'}</h3></div><Badge variant="outline" className={warnings ? 'review-warning-badge' : 'review-clear-badge'}>{warnings ? `${warnings} to review` : 'No flags detected'}</Badge></div>
     <p className="review-intro">Detected in your Word document</p><div className="review-metrics">{Object.entries(review.elements).map(([name, count]) => <div key={name}><strong>{count.toString().padStart(2,'0')}</strong><span>{name}</span></div>)}</div>
+    {review.readiness && review.readiness.autoFixes.length > 0 && (
+      <section className="review-auto-fixes" aria-label="Handled automatically">
+        <div className="review-auto-fixes-head">
+          <CheckCircle size={17} weight="fill" />
+          <strong>Handled automatically</strong>
+        </div>
+        <ul>
+          {review.readiness.autoFixes.map(fix => (
+            <li key={fix.code}><strong>{fix.title}:</strong> {fix.detail}</li>
+          ))}
+        </ul>
+      </section>
+    )}
     <button className="secondary-button" disabled={!canDecide || saving} onClick={onCaptionRepairs}>Preview caption repairs</button>
     {error && <p role="alert">Could not update review decisions: {error} <button onClick={onRetry}>Reload conversion review</button></p>}
     {review.decisionError && <p role="alert">{review.decisionError}</p>}

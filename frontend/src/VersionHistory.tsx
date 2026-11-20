@@ -58,7 +58,7 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
         <p className="ui-version-storage">{history.items.length} / {history.maxVersions} versions · {formatBytes(history.bytesUsed)} / {formatBytes(history.maxBytes)}. History is preserved; saves stop when either limit is reached.</p>
         <div className="ui-version-layout"><nav aria-label="Saved source versions" className="ui-version-list">{history.items.map(version => <button key={version.revision} disabled={restoring} aria-current={selected?.revision === version.revision ? 'true' : undefined} onClick={() => { if (job) setSelection({ id: job.id, revision: version.revision }); setRestoreError('') }}>
           <strong>Version {version.revision}{version.revision === history.currentRevision ? ' · current' : ''}</strong>
-          <span>{version.origin === 'converted' ? 'Original conversion' : version.origin === 'legacy' ? 'Existing saved source' : version.origin === 'restored' ? `Restored from version ${version.restoredFrom}` : 'Saved edit'}</span>
+          <span>{version.origin === 'converted' ? 'Original conversion' : version.origin === 'auto-fixed' ? 'Automatic fixes' : version.origin === 'legacy' ? 'Existing saved source' : version.origin === 'restored' ? `Restored from version ${version.restoredFrom}` : 'Saved edit'}</span>
           <time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</time>
         </button>)}</nav>
           <section className="ui-version-preview" aria-label="Version preview">

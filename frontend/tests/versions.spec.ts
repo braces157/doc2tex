@@ -120,7 +120,7 @@ test('saved versions preview/download and restore survive reload before build an
   await page.reload(); await expect(editor(page)).toHaveText(FIRST, { useInnerText: true })
   await page.getByRole('tab', { name: 'Preview', exact: true }).click()
   await page.getByRole('button', { name: 'Build PDF preview', exact: true }).click()
-  await expect(page.getByText('Setting your words in place…', { exact: true })).toBeVisible()
+  await expect(page.getByText('Compiling PDF…', { exact: true })).toBeVisible()
   expect(state.compiledSource).toBe(FIRST)
   await expect(page.getByRole('button', { name: 'Saved versions', exact: true })).toBeDisabled()
   const exporting = page.waitForEvent('download')

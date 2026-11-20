@@ -50,7 +50,7 @@ export interface SavedVersion {
   revision: number
   createdAt: string
   bytes: number
-  origin: 'converted' | 'legacy' | 'saved' | 'restored'
+  origin: 'converted' | 'auto-fixed' | 'legacy' | 'saved' | 'restored'
   restoredFrom: number
   bibliographyFilename?: string
   assetBytes?: number
@@ -70,6 +70,21 @@ export interface SavedHistory {
   bytesUsed: number
 }
 
+export interface AutoFix { code: string; title: string; detail: string; count: number }
+export interface ReadinessItem { code: string; severity: 'blocking' | 'note'; title: string; guidance: string }
+export interface ReadinessReport {
+  status: 'ready' | 'ready-with-notes' | 'needs-attention'
+  headline: string
+  summary: string
+  revision: number
+  pdfVerified: boolean
+  pageCount: number | null
+  textCoverage: number | null
+  autoFixes: AutoFix[]
+  actions: ReadinessItem[]
+  handledAutomatically: string[]
+}
+
 export interface ConversionReview {
   elements: Record<string, number>
   findings: {code: string; severity: 'info' | 'warning'; title: string; detail: string}[]
@@ -81,6 +96,7 @@ export interface ConversionReview {
   decisions?: ReviewDecision[]
   originalTruncated?: boolean
   decisionError?: string
+  readiness?: ReadinessReport | null
 }
 
 export interface OriginalParagraph { part: string; location: string; text: string; truncated: boolean }
