@@ -1,0 +1,46 @@
+services:
+  doc2tex:
+    build: .
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    cpus: "2.0"
+    pids_limit: 128
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - doc2tex-data:/app/.data
+    environment:
+      FORWARD_HEADERS_STRATEGY: framework
+      DOC2TEX_ALLOWED_HOSTS: ${DOC2TEX_ALLOWED_HOSTS:-doc2tex.tech,www.doc2tex.tech}
+      DOC2TEX_DEMO_MODE: ${DOC2TEX_DEMO_MODE:-true}
+      DOC2TEX_TRUST_PROXY_IP: ${DOC2TEX_TRUST_PROXY_IP:-true}
+      DOC2TEX_AI_LAYOUT_ENABLED: "false"
+      DOC2TEX_DEMO_RETENTION_MINUTES: ${DOC2TEX_DEMO_RETENTION_MINUTES:-60}
+      DOC2TEX_DEMO_MAX_JOBS: ${DOC2TEX_DEMO_MAX_JOBS:-50}
+      DOC2TEX_DEMO_MAX_JOBS_PER_SESSION: ${DOC2TEX_DEMO_MAX_JOBS_PER_SESSION:-10}
+      DOC2TEX_DEMO_UPLOADS_PER_WINDOW: ${DOC2TEX_DEMO_UPLOADS_PER_WINDOW:-10}
+      DOC2TEX_DEMO_PREVIEWS_PER_WINDOW: ${DOC2TEX_DEMO_PREVIEWS_PER_WINDOW:-20}
+      DOC2TEX_DEMO_RATE_LIMIT_WINDOW_MINUTES: ${DOC2TEX_DEMO_RATE_LIMIT_WINDOW_MINUTES:-10}
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    depends_on:
+      doc2tex:
+        condition: service_healthy
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN:-}"
+
+volumes:
+  doc2tex-data:

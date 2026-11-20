@@ -33,23 +33,24 @@ class ConversionService {
     private final DocumentInspector inspector;
     private final FontSupport fonts;
     private final AiLayoutService aiLayout;
+    private final DemoCleanupService demoCleanup;
     private final ThreadPoolExecutor executor;
 
     ConversionService(JobStore store, Tools tools, ToolRunner runner, DocxValidator validator, AppProperties properties, DocumentInspector inspector, FontSupport fonts) {
         this(store, tools, runner, validator, properties, inspector, fonts, new AiLayoutService(AiLayoutSettings.disabled(), runner));
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
     ConversionService(JobStore store, Tools tools, ToolRunner runner, DocxValidator validator, AppProperties properties, DocumentInspector inspector,
             FontSupport fonts, AiLayoutService aiLayout) {
-        this.store = store;
-        this.tools = tools;
-        this.runner = runner;
-        this.validator = validator;
-        this.properties = properties;
-        this.inspector = inspector;
-        this.fonts = fonts;
-        this.aiLayout = aiLayout;
+        this(store, tools, runner, validator, properties, inspector, fonts, aiLayout, new DemoCleanupService(store, HostingProperties.localDefaults()));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    ConversionService(JobStore store, Tools tools, ToolRunner runner, DocxValidator validator, AppProperties properties,
+            DocumentInspector inspector, FontSupport fonts, AiLayoutService aiLayout, DemoCleanupService demoCleanup) {
+        this.store = store; this.tools = tools; this.runner = runner; this.validator = validator;
+        this.properties = properties; this.inspector = inspector; this.fonts = fonts;
+        this.aiLayout = aiLayout; this.demoCleanup = demoCleanup;
         executor = new ThreadPoolExecutor(properties.workers(), properties.workers(), 0, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(properties.queueCapacity()), Thread.ofPlatform().name("conversion-", 0).factory(),
                 new ThreadPoolExecutor.AbortPolicy());
@@ -66,7 +67,7 @@ class ConversionService {
     }
 
     Job submit(MultipartFile file, String template, LayoutOptions layout, boolean autoPrepare) throws IOException {
-        return submit(file.getOriginalFilename(), file.getSize(), template, layout, "", autoPrepare, file::transferTo);
+        return submit(file.getOriginalFilename(), file.getSize(), template, layout, "", autoPrepare, file::transferTo, null);
     }
 
     Job deriveLayout(String id, int revision, String template, LayoutOptions layout) throws IOException {
@@ -75,12 +76,12 @@ class ConversionService {
             if (parent.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed. Reopen this document before creating a layout copy.");
             Path original = original(id);
             String name = parent.filename(); if (name.length() > 180) name = name.substring(0, 180);
-            return submit(parent.filename(), Files.size(original), template, layout, name + " · layout copy", false, path -> Files.copy(original, path));
+            return submit(parent.filename(), Files.size(original), template, layout, name + " · layout copy", false, path -> Files.copy(original, path), id);
         }
     }
 
     @FunctionalInterface private interface InputWriter { void write(Path path) throws IOException; }
-    private Job submit(String originalFilename, long size, String template, LayoutOptions layout, String displayName, boolean autoPrepare, InputWriter writer) throws IOException {
+    private Job submit(String originalFilename, long size, String template, LayoutOptions layout, String displayName, boolean autoPrepare, InputWriter writer, String protectedJobId) throws IOException {
         if (!List.of("article", "report").contains(template)) throw bad("Choose the article or report template.");
         if (layout == null) throw bad("Choose valid layout settings.");
         String filename = cleanFilename(originalFilename);
@@ -93,16 +94,16 @@ class ConversionService {
         Files.createDirectories(directory);
         Path input = directory.resolve("input.docx");
         writer.write(input);
-        try { validator.validate(input); }
-        catch (RuntimeException exception) {
-            Files.deleteIfExists(input);
-            Files.deleteIfExists(directory);
-            throw exception;
-        }
         Instant now = Instant.now();
         Job job = new Job(id, filename, template, "QUEUED", "NOT_REQUESTED", "Waiting for a conversion worker.", "",
                 now, now, size, 0, displayName, false, layout);
-        store.save(job);
+        try {
+            validator.validate(input);
+            demoCleanup.admitAndSave(job, protectedJobId);
+        } catch (RuntimeException | IOException exception) {
+            SourceVersionStore.removeTreeQuietly(directory);
+            throw exception;
+        }
         try { executor.execute(() -> convert(id, autoPrepare)); }
         catch (RejectedExecutionException exception) {
             store.save(job.withStatus("FAILED", "All conversion workers are busy. Try uploading again shortly."));
@@ -270,6 +271,7 @@ class ConversionService {
     private void compileLocked(String id) {
         Job job = store.get(id);
         Path directory = store.directory(id);
+        Path preview = null;
         boolean logStarted = false;
         try {
             Path diagnosticsFile = directory.resolve("compiler-diagnostics.json");
@@ -282,12 +284,13 @@ class ConversionService {
             logStarted = true;
             store.save(job.withPreview("COMPILING", "Building the PDF. The first build may download TeX packages."));
             Path output = directory.resolve("output");
-            Path preview = directory.resolve("preview-" + job.revision());
+            preview = directory.resolve("preview-" + job.revision());
             Files.createDirectories(preview);
             ToolRunner.Result result = runner.run(List.of(tools.tectonic(), "--untrusted", "--color", "never", "--outdir", preview.toString(),
                     "main.tex"), output, directory.resolve("preview.log"), properties.previewTimeoutSeconds());
             if (result.exitCode() != 0 || !Files.isRegularFile(preview.resolve("main.pdf")))
                 throw new IOException(PreviewFailure.message(result.log()));
+            SourceVersionStore.checkPreviewSize(preview);
             var diagnostics = CompilerDiagnostics.fromLog(compilerLog, job.revision(), "READY", null);
             CompilerDiagnostics.save(directory, diagnostics);
             try {
@@ -300,6 +303,7 @@ class ConversionService {
             store.save(store.get(id).withPreview("READY", warnings
                     ? "PDF built with warnings. Check compiler diagnostics before using it." : "PDF preview is ready."));
         } catch (Exception exception) {
+            if (preview != null) SourceVersionStore.removeTreeQuietly(preview);
             if (logStarted) try {
                 CompilerDiagnostics.save(directory, CompilerDiagnostics.fromLog(directory.resolve("preview.log"), job.revision(), "FAILED", exception.getMessage()));
             } catch (IOException | RuntimeException reportError) { log.warn("Could not retain compiler diagnostics for {}", id, reportError); }

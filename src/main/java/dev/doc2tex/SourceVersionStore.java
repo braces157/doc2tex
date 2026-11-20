@@ -24,6 +24,7 @@ import org.springframework.http.HttpStatus;
 /** Immutable snapshots; job.properties revision is the sole committed-source pointer. */
 class SourceVersionStore {
     static final int MAX_SOURCE = 2 * 1024 * 1024;
+    static final long MAX_PREVIEW_BYTES = 50L * 1024 * 1024;
     private final int maxVersions;
     private final long maxBytes;
 
@@ -81,6 +82,7 @@ class SourceVersionStore {
             }
         }
         replaceCache(directory, committed.source(), committed.bibliography());
+        removeSupersededPreviews(directory, job.revision());
     }
 
     History list(Job job, Path directory) throws IOException {
@@ -152,6 +154,7 @@ class SourceVersionStore {
         checkpoint(Stage.CACHE_REPLACED);
         persist.save(next); // Atomic commit pointer update; prior snapshots remain immutable.
         checkpoint(Stage.METADATA_COMMITTED);
+        removeSupersededPreviews(directory, next.revision());
         return next;
     }
 
@@ -280,6 +283,61 @@ class SourceVersionStore {
             ByteBuffer buffer = ByteBuffer.wrap(bytes); while (buffer.hasRemaining()) channel.write(buffer); channel.force(true);
         }
     }
+    static void removeSupersededPreviews(Path directory, int keepRevision) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) return;
+        try {
+            JobStore.checkUnlinked(directory);
+        } catch (ApiException exception) {
+            return;
+        }
+        try (var paths = Files.list(directory)) {
+            for (Path entry : paths.toList()) {
+                String name = entry.getFileName().toString();
+                if (!name.startsWith("preview-")) continue;
+                String suffix = name.substring("preview-".length());
+                if (!suffix.matches("[0-9]+")) continue;
+                try {
+                    if (Integer.parseInt(suffix) != keepRevision) removeTreeQuietly(entry);
+                } catch (NumberFormatException ignored) { /* Skip overflows or malformed suffixes. */ }
+            }
+        } catch (IOException ignored) { /* Best-effort cleanup of superseded preview artifacts. */ }
+    }
+
+    static void checkPreviewSize(Path previewDirectory) throws IOException {
+        checkPreviewSize(previewDirectory, MAX_PREVIEW_BYTES);
+    }
+
+    static void checkPreviewSize(Path previewDirectory, long maxBytes) throws IOException {
+        JobStore.checkUnlinked(previewDirectory);
+        if (!Files.isDirectory(previewDirectory, LinkOption.NOFOLLOW_LINKS)) return;
+        long total = 0;
+        try (var walk = Files.walk(previewDirectory)) {
+            for (Path entry : walk.toList()) {
+                JobStore.checkUnlinked(entry);
+                if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+                    total += Files.size(entry);
+                    if (total > maxBytes) {
+                        removeTreeQuietly(previewDirectory);
+                        throw new IOException("The compiled PDF preview exceeds the " + Math.max(1L, maxBytes / (1024 * 1024)) + " MB storage limit.");
+                    }
+                }
+            }
+        }
+    }
+
+    static void removeTreeQuietly(Path path) {
+        try {
+            JobStore.checkUnlinked(path);
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return;
+            try (var walk = Files.walk(path)) {
+                for (Path child : walk.sorted(Comparator.reverseOrder()).toList()) {
+                    JobStore.checkUnlinked(child);
+                    Files.deleteIfExists(child);
+                }
+            }
+        } catch (IOException | RuntimeException ignored) { /* Best-effort cleanup of stale/failed preview artifacts. */ }
+    }
+
     static String digest(byte[] bytes) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
         catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }

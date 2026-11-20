@@ -33,6 +33,7 @@ class JobStore {
     private final Path root;
     private final SourceVersionStore versions;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
+    private final Map<String, String> owners = new ConcurrentHashMap<>();
     private final Map<String, String> historyFailures = new ConcurrentHashMap<>();
     // Retain lock identities for this process lifetime, including after deletion.
     private final Map<String, ReentrantReadWriteLock> locks = new ConcurrentHashMap<>();
@@ -53,9 +54,11 @@ class JobStore {
                 Path metadata = directory.resolve("job.properties");
                 if (!Files.isRegularFile(metadata)) continue;
                 try {
-                    Job job = readMetadata(metadata);
+                    StoredJob stored = readStored(metadata);
+                    Job job = stored.job();
                     String id = job.id();
                     if (!directory.getFileName().toString().equals(id)) continue;
+                    if (!stored.owner().isBlank()) owners.put(id, stored.owner());
                     if (List.of("QUEUED", "CONVERTING").contains(job.status()))
                         job = job.withStatus("FAILED", "The app restarted during conversion. Upload the document again.");
                     if (List.of("QUEUED", "COMPILING").contains(job.previewStatus()))
@@ -86,9 +89,11 @@ class JobStore {
                 for (Path marker : markers.filter(path -> path.getFileName().toString().endsWith(".properties")).toList()) {
                     // An unreadable tombstone must fail startup rather than expose a partially removed job.
                     try {
-                        Job job = readMetadata(marker).pendingDeletion();
+                        StoredJob stored = readStored(marker);
+                        Job job = stored.job().pendingDeletion();
                         if (!marker.getFileName().toString().equals(job.id() + ".properties"))
                             throw new IOException("Invalid deletion marker name");
+                        if (!stored.owner().isBlank()) owners.put(job.id(), stored.owner());
                         jobs.put(job.id(), job);
                     } catch (RuntimeException exception) {
                         throw new IOException("Unreadable deletion marker. Back up storage and repair the marker before restarting.", exception);
@@ -98,15 +103,19 @@ class JobStore {
         }
     }
 
-    private Job readMetadata(Path path) throws IOException {
+    private record StoredJob(Job job, String owner) {}
+
+    private StoredJob readStored(Path path) throws IOException {
         checkUnlinked(path);
         try (InputStream input = Files.newInputStream(path)) {
             Properties p = new Properties(); p.load(input);
-            return new Job(UUID.fromString(p.getProperty("id")).toString(), p.getProperty("filename"), p.getProperty("template"),
+            Job job = new Job(UUID.fromString(p.getProperty("id")).toString(), p.getProperty("filename"), p.getProperty("template"),
                     p.getProperty("status"), p.getProperty("previewStatus"), p.getProperty("message", ""),
                     p.getProperty("previewMessage", ""), Instant.parse(p.getProperty("createdAt")),
                     Instant.parse(p.getProperty("updatedAt")), Long.parseLong(p.getProperty("size")),
                     Integer.parseInt(p.getProperty("revision", "0")), p.getProperty("displayName", ""), false, LayoutOptions.read(p));
+            String owner = p.getProperty("ownerSession", "").trim();
+            return new StoredJob(job, DemoSession.isValid(owner) ? owner : "");
         }
     }
 
@@ -191,6 +200,7 @@ class JobStore {
                 checkUnlinked(marker);
                 removePath(marker);
                 jobs.remove(id);
+                owners.remove(id);
                 historyFailures.remove(id);
             } catch (IOException exception) {
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -238,8 +248,29 @@ class JobStore {
         }
     }
 
+    private java.util.stream.Stream<Job> visibleJobs() {
+        String session = DemoSession.current();
+        var stream = jobs.values().stream();
+        return session == null ? stream : stream.filter(job -> session.equals(owners.get(job.id())));
+    }
+
+    boolean exists(String id) { return jobs.containsKey(id); }
+
+    boolean isOwnedBy(String id, String sessionId) {
+        return sessionId != null && sessionId.equals(owners.get(id));
+    }
+
+    int totalCount() { return jobs.size(); }
+
+    long sessionCount(String sessionId) {
+        if (sessionId == null) return 0;
+        return jobs.keySet().stream().filter(id -> sessionId.equals(owners.get(id))).count();
+    }
+
+    List<Job> snapshotAll() { return List.copyOf(jobs.values()); }
+
     List<Job> list() {
-        return jobs.values().stream().sorted(newestFirst()).limit(30).toList();
+        return visibleJobs().sorted(newestFirst()).limit(30).toList();
     }
 
     private Comparator<Job> newestFirst() {
@@ -258,7 +289,7 @@ class JobStore {
         Comparator<Job> order = sort.equals("newest") ? newestFirst()
                 : Comparator.comparing(Job::createdAt).thenComparing(Job::id);
         // Capture one collection snapshot so the count and page describe the same results.
-        List<Job> matches = jobs.values().stream()
+        List<Job> matches = visibleJobs()
                 .filter(job -> job.filename().toLowerCase(Locale.ROOT).contains(term) || job.displayName().toLowerCase(Locale.ROOT).contains(term))
                 .filter(job -> status.isEmpty() || job.status().equals(status))
                 .sorted(order).toList();
@@ -279,6 +310,8 @@ class JobStore {
     synchronized void save(Job job) throws IOException {
         Path directory = directory(job.id());
         Files.createDirectories(directory);
+        String currentOwner = DemoSession.current();
+        if (currentOwner != null && !currentOwner.isBlank()) owners.putIfAbsent(job.id(), currentOwner);
         writeMetadata(job, directory.resolve("job.properties"));
         jobs.put(job.id(), job);
     }
@@ -299,6 +332,8 @@ class JobStore {
         p.setProperty("size", Long.toString(job.size()));
         p.setProperty("revision", Integer.toString(job.revision()));
         p.setProperty("displayName", job.displayName());
+        String owner = owners.getOrDefault(job.id(), "");
+        if (!owner.isBlank()) p.setProperty("ownerSession", owner);
         job.layout().write(p);
         Path temporary = metadata.resolveSibling(metadata.getFileName() + ".tmp");
         checkUnlinked(temporary);
