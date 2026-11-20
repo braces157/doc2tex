@@ -50,8 +50,29 @@ function readyReport(revision = 1): ReadinessReport {
   }
 }
 
-async function setup(page: Page, readiness: ReadinessReport = readyReport(1), options?: { progressive?: boolean }) {
+async function setup(
+  page: Page,
+  readiness: ReadinessReport = readyReport(1),
+  options?: {
+    progressive?: boolean
+    holdCompletion?: boolean
+    findings?: ConversionReview['findings']
+    verifyOnPreviewPost?: ReadinessReport
+  },
+) {
   let polls = 0
+  let releasePoll: (() => void) | null = null
+  const pollGate = options?.holdCompletion
+    ? new Promise<void>(resolve => {
+        releasePoll = resolve
+      })
+    : null
+  let notifyPollArrived: (() => void) | null = null
+  const pollArrived = options?.holdCompletion
+    ? new Promise<void>(resolve => {
+        notifyPollArrived = resolve
+      })
+    : null
   const baseJob: Job = {
     id: ID,
     filename: 'paper.docx',
@@ -70,6 +91,9 @@ async function setup(page: Page, readiness: ReadinessReport = readyReport(1), op
     source: SOURCE,
     readiness,
     autoPrepares: [] as string[],
+    previewPosts: 0,
+    pollArrived,
+    releasePoll: () => releasePoll?.(),
   }
 
   await page.context().route('**/api/**', async route => {
@@ -104,6 +128,10 @@ async function setup(page: Page, readiness: ReadinessReport = readyReport(1), op
         polls++
         const current = state.jobs[0]
         if (polls === 1) {
+          if (pollGate) {
+            notifyPollArrived?.()
+            await pollGate
+          }
           state.jobs[0] = {
             ...current,
             status: 'COMPLETED',
@@ -139,7 +167,7 @@ async function setup(page: Page, readiness: ReadinessReport = readyReport(1), op
       const current = state.jobs[0]
       const review: ConversionReview = {
         elements: { headings: 1, tables: 0, equations: 0, images: 0, footnotes: 0, links: 0 },
-        findings: [
+        findings: options?.findings ?? [
           {
             code: 'captions',
             severity: 'warning',
@@ -158,6 +186,14 @@ async function setup(page: Page, readiness: ReadinessReport = readyReport(1), op
         readiness: { ...state.readiness, revision: current.revision },
       }
       return json(review)
+    }
+    if (path === `/api/jobs/${ID}/preview` && request.method() === 'POST') {
+      state.previewPosts++
+      if (options?.verifyOnPreviewPost && state.jobs[0]) {
+        state.readiness = options.verifyOnPreviewPost
+        state.jobs[0] = { ...state.jobs[0], updatedAt: '2026-11-20T10:00:09Z' }
+      }
+      return json(state.jobs[0], 202)
     }
     if (path === `/api/jobs/${ID}/source`) {
       if (request.method() === 'PUT') {
@@ -203,6 +239,9 @@ test('default auto-prepare lands on Preview with Ready to use banner and clears 
 
   const banner = page.getByRole('region', { name: 'Document readiness', exact: true })
   await expect(banner.getByRole('heading', { name: 'Ready to use', exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'PDF preview, page 1 of 1', exact: true })).toBeVisible()
+  await expect(page.locator('.pdf-navigation')).toContainText('PAGE 1 / 1')
+  await expect(page.locator('.pdf-loading')).toHaveCount(0)
   await expect(banner).toContainText('Verified · 1 page')
   await expect(banner.getByRole('button', { name: 'Download PDF', exact: true })).toBeVisible()
 
@@ -213,20 +252,26 @@ test('default auto-prepare lands on Preview with Ready to use banner and clears 
   await expect(reviewTab.locator('.ui-tab-count')).toHaveCount(0)
 })
 
-test('manual switch to Source stays on Source and editing marks readiness stale', async ({ page }) => {
-  await setup(page, readyReport(1), { progressive: false })
+test('manual switch to Source during pending completion stays on Source and editing marks readiness stale', async ({ page }) => {
+  const state = await setup(page, readyReport(1), { progressive: true, holdCompletion: true })
   await uploadPaper(page)
 
-  await expect(page.getByRole('tab', { name: 'Preview', exact: true })).toHaveAttribute('aria-selected', 'true')
-  const banner = page.getByRole('region', { name: 'Document readiness', exact: true })
-  await banner.getByRole('button', { name: 'Edit LaTeX', exact: true }).click()
-
+  await state.pollArrived
   const sourceTab = page.getByRole('tab', { name: 'Source', exact: true })
+  await page.getByRole('tab', { name: /^Review/ }).click()
+  await sourceTab.click()
   await expect(sourceTab).toHaveAttribute('aria-selected', 'true')
+
+  state.releasePoll()
+  const banner = page.getByRole('region', { name: 'Document readiness', exact: true })
+  await expect(banner.getByRole('heading', { name: 'Ready to use', exact: true })).toBeVisible()
+  await expect(sourceTab).toHaveAttribute('aria-selected', 'true')
+
   const editor = page.getByRole('textbox', { name: 'LaTeX source editor', exact: true })
   await editor.fill(SOURCE + '\n% manual user edit')
 
   await expect(banner.getByRole('heading', { name: 'Source edited — PDF check out of date', exact: true })).toBeVisible()
+  await expect(editor).toContainText('% manual user edit')
   await expect(sourceTab).toHaveAttribute('aria-selected', 'true')
 })
 
@@ -300,4 +345,75 @@ test('unchecking Auto-fix & verify PDF sends autoPrepare=false and stays on Sour
   const banner = page.getByRole('region', { name: 'Document readiness', exact: true })
   await expect(banner.getByRole('heading', { name: 'LaTeX ready — build PDF to verify', exact: true })).toBeVisible()
   await expect(banner.getByRole('button', { name: 'Build PDF', exact: true })).toBeVisible()
+})
+
+test('Review tab surfaces blocking readiness failure even with zero source or compiler warnings', async ({ page }) => {
+  const failedReadiness: ReadinessReport = {
+    status: 'needs-attention',
+    headline: 'Needs attention before use',
+    summary: '1 item needs your attention in Word or Source before sharing this document.',
+    revision: 0,
+    pdfVerified: false,
+    pageCount: null,
+    textCoverage: null,
+    autoFixes: [],
+    actions: [
+      {
+        code: 'pdf-failed',
+        severity: 'blocking',
+        title: 'PDF could not be built',
+        guidance: 'Something in this document stopped PDF creation. You can still download the LaTeX ZIP or open Source to inspect it.',
+      },
+    ],
+    handledAutomatically: [],
+  }
+  await setup(page, failedReadiness, { progressive: false, findings: [] })
+  await uploadPaper(page)
+
+  const reviewTab = page.getByRole('tab', { name: /^Review/ })
+  await expect(reviewTab.locator('.ui-tab-count')).toHaveText('1')
+  await reviewTab.click()
+
+  const panel = page.getByRole('tabpanel', { name: /^Review/ })
+  await expect(panel.getByRole('heading', { name: 'Action needed before sharing', exact: true })).toBeVisible()
+  await expect(panel).toContainText('1 to review')
+  await expect(panel).toContainText('PDF could not be built')
+  await expect(panel).toContainText('Something in this document stopped PDF creation.')
+  await expect(panel).not.toContainText('No issues detected')
+  await expect(panel).not.toContainText('No common conversion risks detected')
+})
+
+test('Verify PDF verifies an existing unverified READY preview in place', async ({ page }) => {
+  const unverifiedBuilt: ReadinessReport = {
+    status: 'ready-with-notes',
+    headline: 'PDF built — quick look suggested',
+    summary: 'PDF preview is ready. 1 item is worth a quick glance.',
+    revision: 1,
+    pdfVerified: false,
+    pageCount: null,
+    textCoverage: null,
+    autoFixes: [],
+    actions: [
+      {
+        code: 'pdf-unverified-built',
+        severity: 'note',
+        title: 'Existing PDF has not been checked yet',
+        guidance: 'Click Verify PDF to check this PDF against your Word document, or compare the preview manually.',
+      },
+    ],
+    handledAutomatically: [],
+  }
+  const state = await setup(page, unverifiedBuilt, {
+    progressive: false,
+    verifyOnPreviewPost: readyReport(1),
+  })
+  await uploadPaper(page)
+
+  const banner = page.getByRole('region', { name: 'Document readiness', exact: true })
+  await expect(banner.getByRole('heading', { name: 'PDF built — quick look suggested', exact: true })).toBeVisible()
+  await banner.getByRole('button', { name: 'Verify PDF', exact: true }).click()
+
+  await expect(banner.getByRole('heading', { name: 'Ready to use', exact: true })).toBeVisible()
+  await expect(banner).toContainText('Verified · 1 page')
+  expect(state.previewPosts).toBe(1)
 })

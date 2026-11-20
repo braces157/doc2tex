@@ -13,6 +13,7 @@ interface Props {
   readyForActions: boolean
   previewAvailable: boolean
   onBuild: () => void
+  onVerify: () => void
   onDownloadPdf: () => void
   onOpenView: (view: 'source' | 'pdf' | 'review') => void
 }
@@ -27,6 +28,7 @@ export function ReadinessBanner({
   readyForActions,
   previewAvailable,
   onBuild,
+  onVerify,
   onDownloadPdf,
   onOpenView,
 }: Props) {
@@ -132,6 +134,11 @@ export function ReadinessBanner({
                 <ArrowDown size={14} weight="bold" />
                 Download PDF
               </Button>
+              {readiness.actions.some(item => item.code === 'pdf-unverified-built') && (
+                <Button variant="outline" size="sm" disabled={!readyForActions} onClick={onVerify}>
+                  Verify PDF
+                </Button>
+              )}
               {view !== 'pdf' && (
                 <Button variant="outline" size="sm" onClick={() => onOpenView('pdf')}>
                   View PDF

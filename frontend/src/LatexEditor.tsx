@@ -82,7 +82,7 @@ export function LatexEditor({ source, disabled, onChange, editorRef, commandKey 
       wrapping.of(wrap ? EditorView.lineWrapping : []),
       EditorView.theme({ '&': { height: '100%', fontSize: '13px' }, '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-mono)', lineHeight: '22px' },
         '.cm-content': { padding: '14px 0', color: '#181715', caretColor: '#1f4d3a' }, '.cm-line': { padding: '0 16px' },
-        '.cm-gutters': { backgroundColor: '#f5f3ee', color: '#9b958b', borderRight: '1px solid #e2ddd3', minWidth: '48px' },
+        '.cm-gutters': { backgroundColor: '#f5f3ee', color: 'var(--muted-foreground)', borderRight: '1px solid #e2ddd3', minWidth: '48px' },
         '.cm-activeLine': { backgroundColor: '#f8f6f2' }, '.cm-activeLineGutter': { backgroundColor: '#eaf2ee', color: '#1f4d3a' },
         '&.cm-focused': { outline: '2px solid #1f4d3a', outlineOffset: '-2px' },
         '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: '#d5e6de' },

@@ -11,6 +11,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,6 +29,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -44,7 +46,10 @@ final class ReadinessCheck {
     private static final int PARAGRAPH_LIMIT = 200;
     private static final int TOKEN_LIMIT = 300;
     private static final int MEDIA_WALK_LIMIT = 500;
+    private static final double MIN_TEXT_COVERAGE = 0.70;
     private static final Pattern WORD_TOKEN = Pattern.compile("[\\p{L}\\p{N}]{3,}");
+    private static final Pattern LINE_WRAP_HYPHEN = Pattern.compile("(?<=[\\p{L}\\p{N}])[-\\u00AD\\u2010\\u2011][ \\t]*\\R[ \\t]*(?=[\\p{L}\\p{N}])");
+    private static final Pattern NON_SPACE_SCRIPT_WRAP = Pattern.compile("(?<=[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsThai}\\p{IsLao}\\p{IsKhmer}\\p{IsMyanmar}])[ \\t]*\\R[ \\t]*(?=[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsThai}\\p{IsLao}\\p{IsKhmer}\\p{IsMyanmar}])");
 
     record Item(String code, String severity, String title, String guidance) {}
     record Verification(int revision, boolean pdfVerified, Integer pageCount, Double textCoverage,
@@ -64,22 +69,53 @@ final class ReadinessCheck {
             pageCount = pdf.getNumberOfPages();
             pdfText = new PDFTextStripper().getText(pdf);
         }
-        String compactPdf = Normalizer.normalize(pdfText == null ? "" : pdfText, Normalizer.Form.NFKC)
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("[\\s\\p{Z}\\u00AD]+", "");
+        Set<String> pdfWords = extractPdfTokens(pdfText);
 
         if (!Files.isRegularFile(originalDocx, LinkOption.NOFOLLOW_LINKS)) {
-            return new Verification(revision, pageCount >= 1, pageCount, null, 0, 0);
+            return new Verification(revision, false, pageCount, null, 0, 0);
         }
 
         List<String> tokens = extractAcceptedBodyTokens(originalDocx);
         int checked = tokens.size();
         int matched = 0;
         for (String token : tokens) {
-            if (compactPdf.contains(token)) matched++;
+            if (pdfWords.contains(token)) matched++;
         }
-        Double coverage = checked >= 5 ? (double) matched / checked : null;
-        return new Verification(revision, pageCount >= 1, pageCount, coverage, checked, matched);
+        Double coverage = checked > 0 ? (double) matched / checked : null;
+        boolean verified = pageCount >= 1 && coverage != null && coverage >= MIN_TEXT_COVERAGE;
+        return new Verification(revision, verified, pageCount, coverage, checked, matched);
+    }
+
+    private static Set<String> extractPdfTokens(String pdfText) {
+        if (pdfText == null || pdfText.isBlank()) return Set.of();
+        String normalized = Normalizer.normalize(pdfText, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
+        normalized = LINE_WRAP_HYPHEN.matcher(normalized).replaceAll("");
+        normalized = NON_SPACE_SCRIPT_WRAP.matcher(normalized).replaceAll("");
+        normalized = normalized.replace("\u00AD", "");
+        var tokens = new HashSet<String>();
+        Matcher matcher = WORD_TOKEN.matcher(normalized);
+        while (matcher.find()) {
+            tokens.add(matcher.group());
+        }
+        return tokens;
+    }
+
+    static boolean verifyExistingPdf(Job job, Path directory) throws IOException {
+        Verification existing = null;
+        try {
+            existing = loadVerification(directory);
+        } catch (IOException | RuntimeException ignored) {
+            // Re-verify if saved metadata is missing or unreadable.
+        }
+        if (existing != null && existing.revision() == job.revision()) return false;
+        Path pdf = directory.resolve("preview-" + job.revision()).resolve("main.pdf");
+        JobStore.checkUnlinked(pdf);
+        if (!Files.isRegularFile(pdf, LinkOption.NOFOLLOW_LINKS)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "The preview file is missing. Save the source and rebuild.");
+        }
+        Verification verification = verifyPdf(directory.resolve("input.docx"), pdf, job.revision());
+        saveVerification(directory, verification);
+        return true;
     }
 
     private static List<String> extractAcceptedBodyTokens(Path originalDocx) {
@@ -227,33 +263,32 @@ final class ReadinessCheck {
     static Report evaluate(Job job, Path directory, String source, List<DocumentInspector.Finding> findings,
                            CompilerDiagnostics.Report diagnostics, AutoPolish.Report autoPolish, Verification verification) {
         int revision = job.revision();
-        boolean pdfVerified = "READY".equals(job.previewStatus())
-                && verification != null
-                && verification.revision() == revision
-                && verification.pdfVerified();
-        Integer pageCount = pdfVerified ? verification.pageCount() : null;
-        Double textCoverage = pdfVerified ? verification.textCoverage() : null;
+        boolean pdfBuilt = "READY".equals(job.previewStatus());
+        boolean buildFailed = "FAILED".equals(job.previewStatus());
+        boolean hasCurrentVerification = pdfBuilt && verification != null && verification.revision() == revision;
+        Integer pageCount = hasCurrentVerification ? verification.pageCount() : null;
+        Double textCoverage = hasCurrentVerification ? verification.textCoverage() : null;
+        boolean hasPages = hasCurrentVerification && pageCount != null && pageCount >= 1;
+        boolean hasMeasurableText = hasCurrentVerification && verification.checkedTokens() > 0 && textCoverage != null;
+        boolean pdfVerified = hasPages && hasMeasurableText && textCoverage >= MIN_TEXT_COVERAGE && verification.pdfVerified();
 
-        List<AutoPolish.Fix> autoFixes = autoPolish == null ? List.of() : autoPolish.fixes();
+        boolean autoPolishMatchesCurrent = autoPolish != null
+                && source != null
+                && autoPolish.sourceHash().equals(ReviewEvidence.digest(source));
+        List<AutoPolish.Fix> autoFixes = autoPolishMatchesCurrent ? autoPolish.fixes() : List.of();
         var handled = new LinkedHashSet<String>();
         for (AutoPolish.Fix fix : autoFixes) handled.add(fix.detail());
 
-        boolean hasUnfixedCaptions = source != null && !CaptionRepairs.preview(source, revision, List.of()).proposals().isEmpty();
-        if (findings.stream().anyMatch(f -> "captions".equals(f.code()))
-                && !hasUnfixedCaptions
-                && autoFixes.stream().noneMatch(f -> "duplicate-captions".equals(f.code()))) {
-            handled.add("Duplicate figure or table numbers were cleaned up automatically.");
-        }
+        CaptionRepairs.Plan captionPlan = source == null ? null : CaptionRepairs.preview(source, revision, List.of());
+        boolean captionsAutoFixed = autoFixes.stream().anyMatch(f -> "duplicate-captions".equals(f.code()));
+        boolean hasUnfixedCaptions = captionPlan == null
+                || !captionPlan.proposals().isEmpty()
+                || !captionPlan.warnings().isEmpty()
+                || !captionsAutoFixed;
 
-        boolean unsupportedMediaRemaining = hasUnsupportedMedia(directory);
-        if (findings.stream().anyMatch(f -> "image_formats".equals(f.code()))
-                && !unsupportedMediaRemaining
-                && autoFixes.stream().noneMatch(f -> "image-conversion".equals(f.code()))) {
-            handled.add("Unsupported image formats were replaced or removed from the source.");
-        }
+        boolean unsupportedMediaRemaining = hasUnsupportedMedia(directory, source);
 
         Map<String, Item> actions = new LinkedHashMap<>();
-        boolean buildFailed = "FAILED".equals(job.previewStatus());
 
         if (diagnostics != null && Integer.valueOf(revision).equals(diagnostics.revision())) {
             if (buildFailed) {
@@ -292,11 +327,23 @@ final class ReadinessCheck {
                     "Something in this document stopped PDF creation. You can still download the LaTeX ZIP or open Source to inspect it."));
         }
 
-        if (pdfVerified && verification.checkedTokens() >= 10 && textCoverage != null && textCoverage < 0.70) {
+        if (hasCurrentVerification && !hasPages) {
+            actions.putIfAbsent("pdf-empty", new Item("pdf-empty", "blocking",
+                    "PDF has no pages",
+                    "The compiled PDF appears empty. Inspect the LaTeX source or compiler log before sharing."));
+        } else if (hasCurrentVerification && hasMeasurableText && textCoverage < MIN_TEXT_COVERAGE) {
             actions.putIfAbsent("low-text-coverage", new Item("low-text-coverage", "blocking",
                     "Some document text may be missing from the PDF",
                     "Compare the PDF preview against your Word file before sharing."));
-        } else if (!pdfVerified && !buildFailed) {
+        } else if (hasCurrentVerification && !hasMeasurableText) {
+            actions.putIfAbsent("pdf-text-unverified", new Item("pdf-text-unverified", "note",
+                    "PDF text could not be checked automatically",
+                    "The PDF compiled, but no measurable Word body text was available to compare. Glance through the PDF preview before sharing."));
+        } else if (pdfBuilt && !hasCurrentVerification) {
+            actions.putIfAbsent("pdf-unverified-built", new Item("pdf-unverified-built", "note",
+                    "Existing PDF has not been checked yet",
+                    "Click Verify PDF to check this PDF against your Word document, or compare the preview manually."));
+        } else if (!pdfBuilt && !buildFailed) {
             actions.putIfAbsent("pdf-unverified", new Item("pdf-unverified", "note",
                     "PDF has not been checked yet",
                     "Click Build PDF to verify the finished document, or download the LaTeX ZIP now."));
@@ -383,10 +430,16 @@ final class ReadinessCheck {
             }
         }
 
-        if (autoPolish != null && !autoPolish.skipped().isEmpty() && !actions.containsKey("image_formats")) {
+        if (autoPolishMatchesCurrent && !autoPolish.skipped().isEmpty()) {
             for (int i = 0; i < autoPolish.skipped().size(); i++) {
+                String skipNote = autoPolish.skipped().get(i);
+                boolean isImageSkip = skipNote.startsWith("Vector image ")
+                        || skipNote.startsWith("Image ")
+                        || skipNote.startsWith("Multi-page image ");
+                if (isImageSkip && actions.containsKey("image_formats")) continue;
                 actions.putIfAbsent("auto-polish-skipped-" + i, new Item("auto-polish-skipped-" + i, "note",
-                        "Some items could not be fixed automatically", autoPolish.skipped().get(i)));
+                        isImageSkip ? "Some items could not be fixed automatically" : "Automatic preparation could not finish",
+                        skipNote));
             }
         }
 
@@ -405,10 +458,15 @@ final class ReadinessCheck {
                     : blockingCount + " items need your attention in Word or Source before sharing this document.";
         } else if (noteCount > 0) {
             status = "ready-with-notes";
-            headline = pdfVerified ? "Ready — quick look suggested" : "LaTeX ready — build PDF to verify";
+            headline = pdfVerified ? "Ready — quick look suggested"
+                    : pdfBuilt ? "PDF built — quick look suggested"
+                    : "LaTeX ready — build PDF to verify";
             if (pdfVerified) {
                 summary = "Built a " + pageLabel(pageCount) + " PDF" + fixPhrase(autoFixes) + ". "
                         + noteLabel(noteCount) + " worth a quick glance.";
+            } else if (pdfBuilt) {
+                summary = (pageCount != null ? "Built a " + pageLabel(pageCount) + " PDF" : "PDF preview is ready")
+                        + fixPhrase(autoFixes) + ". " + noteLabel(noteCount) + " worth a quick glance.";
             } else {
                 summary = "Conversion finished" + fixPhrase(autoFixes) + ". " + noteLabel(noteCount) + " to check.";
             }
@@ -423,7 +481,39 @@ final class ReadinessCheck {
                 autoFixes, actionList, List.copyOf(handled));
     }
 
-    private static boolean hasUnsupportedMedia(Path directory) {
+    private static boolean hasUnsupportedMedia(Path directory, String source) {
+        if (source == null) return hasUnsupportedMediaFiles(directory);
+        List<String> references = AutoPolish.activeMediaReferences(source);
+        if (references.isEmpty()) return false;
+        Path output = directory == null ? null : directory.toAbsolutePath().normalize().resolve("output").normalize();
+        for (String target : references) {
+            String lower = target.toLowerCase(Locale.ROOT);
+            if (lower.matches(".*\\.(png|jpe?g|pdf)$")) continue;
+            int slash = target.lastIndexOf('/');
+            String fileName = slash >= 0 ? target.substring(slash + 1) : target;
+            int dot = fileName.lastIndexOf('.');
+            if (dot > 0 && dot < fileName.length() - 1) return true;
+            if (!hasSupportedMediaSibling(output, target)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasSupportedMediaSibling(Path output, String target) {
+        if (output == null || target.contains("..") || target.contains("\\")) return false;
+        for (String ext : List.of(".png", ".jpg", ".jpeg", ".pdf")) {
+            Path candidate = output.resolve(target + ext).normalize();
+            if (!candidate.startsWith(output)) continue;
+            try {
+                JobStore.checkUnlinked(candidate);
+                if (Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) return true;
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUnsupportedMediaFiles(Path directory) {
         if (directory == null) return false;
         Path media = directory.resolve("output").resolve("media");
         try {

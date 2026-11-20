@@ -284,6 +284,19 @@ export default function App() {
     finally { setPreviewStarting(false) }
   }
 
+  const verifyPreview = async () => {
+    if (!job || missingDocument || dirty || compiling || saving || busy || job.previewStatus !== 'READY') return
+    setError(''); setPreviewStarting(true)
+    try {
+      const next = await api<Job>(`/jobs/${job.id}/preview`, { method: 'POST' })
+      if (currentId.current !== next.id) return
+      setJob(next)
+      setHistory(previous => previous.map(item => item.id === next.id ? next : item))
+      setReviewAttempt(attempt => attempt + 1)
+    } catch (e) { noteMissing(job.id, e); setError(e instanceof Error ? e.message : 'Could not verify the PDF preview.') }
+    finally { setPreviewStarting(false) }
+  }
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(source)
@@ -462,7 +475,7 @@ export default function App() {
       reset: () => void reset(), openJob: next => void openJob(next), trySample: () => void trySample(),
       startConversion: () => void startConversion(), save: () => void save(), copy: () => void copy(),
       download: () => void download(), downloadTex: () => downloadText(source, 'main.tex'),
-      buildPreview: () => void buildPreview() }} />
+      buildPreview: () => void buildPreview(), verifyPreview: () => void verifyPreview() }} />
     {dialog}
   </>
 }

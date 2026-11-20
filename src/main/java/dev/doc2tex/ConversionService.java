@@ -165,19 +165,14 @@ class ConversionService {
             String readyMessage = result.log().isBlank()
                     ? "LaTeX and extracted images are ready." : "LaTeX is ready. See README.txt in the ZIP for conversion messages.";
             if (autoPrepare) {
-                Job readyJob = store.get(id);
-                String initialSource = new String(store.versions().current(readyJob, directory), StandardCharsets.UTF_8);
-                AutoPolish.Result polish = AutoPolish.apply(initialSource, output,
-                        WordReferenceSupport.warnings(directory.resolve("input.docx"), output));
-                AutoPolish.save(output, polish.report());
-                if (polish.changed()) {
-                    store.versions().commitAutoFix(readyJob, directory, polish.source(), store::save);
-                }
-                if (tools.available(tools.tectonic())) {
-                    store.save(store.get(id).withStatus("COMPLETED", readyMessage).withPreview("COMPILING", "Building and verifying your PDF."));
+                boolean prepared = AutoPolish.prepare(id, directory, output, store);
+                String finalMessage = prepared ? readyMessage
+                        : "LaTeX is ready, but automatic preparation could not finish. Review the converted source before sharing.";
+                if (prepared && tools.available(tools.tectonic())) {
+                    store.save(store.get(id).withStatus("COMPLETED", finalMessage).withPreview("COMPILING", "Building and verifying your PDF."));
                     compileLocked(id);
                 } else {
-                    store.save(store.get(id).withStatus("COMPLETED", readyMessage));
+                    store.save(store.get(id).withStatus("COMPLETED", finalMessage));
                 }
             } else {
                 store.save(store.get(id).withStatus("COMPLETED", readyMessage));
@@ -244,7 +239,13 @@ class ConversionService {
 
     private Job previewLocked(String id) throws IOException {
         Job job = ready(id);
-        if (List.of("QUEUED", "COMPILING", "READY").contains(job.previewStatus())) return job;
+        if (List.of("QUEUED", "COMPILING").contains(job.previewStatus())) return job;
+        if ("READY".equals(job.previewStatus())) {
+            if (!ReadinessCheck.verifyExistingPdf(job, store.directory(id))) return job;
+            Job verified = job.withPreview("READY", job.previewMessage());
+            store.save(verified);
+            return verified;
+        }
         if (!tools.available(tools.tectonic())) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                 "PDF preview needs Tectonic. Close the app and run Install tools.cmd in the Windows package, or scripts/setup-tools.ps1 in a development checkout, then relaunch. Source and ZIP export remain available.");
         Path diagnostics = store.directory(id).resolve("compiler-diagnostics.json");

@@ -5,6 +5,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -24,12 +25,16 @@ import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Deterministic, prose-safe source and media repairs applied without altering user meaning. */
 final class AutoPolish {
+    private static final Logger LOG = LoggerFactory.getLogger(AutoPolish.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String FILE_NAME = "auto-polish.json";
+    private static final String PREPARE_WARNING = "Automatic preparation could not finish; the original converted LaTeX was kept.";
     private static final int REPORT_LIMIT = 256 * 1024;
     private static final long MAX_IMAGE_BYTES = 20L * 1024 * 1024;
     private static final int MAX_IMAGE_DIMENSION = 8192;
@@ -41,8 +46,63 @@ final class AutoPolish {
     record Report(int sourceRevision, int appliedRevision, String sourceHash, List<Fix> fixes, List<String> skipped) {}
     record Result(String source, boolean changed, Report report) {}
     private record Span(int start, int end, String replacement) {}
+    private record ConversionOutcome(Path png, String skipReason) {}
 
     private AutoPolish() {}
+
+    static boolean prepare(String id, Path directory, Path output, JobStore store) {
+        Result polish = null;
+        try {
+            Job readyJob = store.get(id);
+            String initialSource = new String(store.versions().current(readyJob, directory), StandardCharsets.UTF_8);
+            polish = apply(initialSource, output, WordReferenceSupport.warnings(directory.resolve("input.docx"), output));
+            if (polish.changed()) {
+                store.versions().commitAutoFix(readyJob, directory, polish.source(), store::save);
+            }
+            save(output, polish.report());
+            return true;
+        } catch (IOException | RuntimeException exception) {
+            LOG.warn("Automatic preparation failed for {}; keeping converted source", id, exception);
+            reconcileFailure(id, directory, output, store, polish);
+            return false;
+        }
+    }
+
+    private static void reconcileFailure(String id, Path directory, Path output, JobStore store, Result polish) {
+        try {
+            Job committed = store.get(id);
+            store.versions().recover(committed, directory);
+            String committedSource = new String(store.versions().current(committed, directory), StandardCharsets.UTF_8);
+            String committedHash = ReviewEvidence.digest(committedSource);
+            Report reconciled;
+            if (polish != null && committed.revision() == polish.report().appliedRevision()
+                    && committedHash.equals(polish.report().sourceHash())) {
+                var skipped = new LinkedHashSet<>(polish.report().skipped());
+                skipped.add(PREPARE_WARNING);
+                reconciled = new Report(0, committed.revision(), committedHash, polish.report().fixes(), List.copyOf(skipped));
+            } else {
+                reconciled = new Report(0, committed.revision(), committedHash, List.of(), List.of(PREPARE_WARNING));
+            }
+            try {
+                save(output, reconciled);
+            } catch (IOException | RuntimeException saveError) {
+                LOG.warn("Could not save failure auto-polish report for {}", id, saveError);
+                deleteReport(output);
+            }
+        } catch (IOException | RuntimeException recoveryError) {
+            LOG.warn("Could not reconcile failed preparation for {}", id, recoveryError);
+        }
+    }
+
+    private static void deleteReport(Path output) {
+        try {
+            Path file = output.resolve(FILE_NAME);
+            JobStore.checkUnlinked(file);
+            Files.deleteIfExists(file);
+        } catch (IOException | RuntimeException ignored) {
+            // Best-effort cleanup so a stale auto-polish report cannot misdescribe an uncommitted source revision.
+        }
+    }
 
     static Result apply(String source, Path output, List<String> referenceWarnings) {
         String current = source;
@@ -76,7 +136,6 @@ final class AutoPolish {
 
         var replacements = new ArrayList<Span>();
         Map<String, String> convertedTargets = new LinkedHashMap<>();
-        Map<String, Path> convertedSourceFiles = new LinkedHashMap<>();
 
         while (matcher.find()) {
             String target = matcher.group(1).strip();
@@ -107,14 +166,15 @@ final class AutoPolish {
                     skipped.add("Image " + fileName + " could not be converted automatically; save it as PNG in Word.");
                     continue;
                 }
-                Path pngTarget = convertRasterToPng(sourceFile, mediaRoot);
-                if (pngTarget == null) {
-                    skipped.add("Image " + fileName + " could not be converted automatically; save it as PNG in Word.");
+                ConversionOutcome outcome = convertRasterToPng(sourceFile, mediaRoot);
+                if (outcome.png() == null) {
+                    skipped.add(outcome.skipReason() != null
+                            ? outcome.skipReason()
+                            : "Image " + fileName + " could not be converted automatically; save it as PNG in Word.");
                     continue;
                 }
-                String relativePng = normalizedOutput.relativize(pngTarget).toString().replace('\\', '/');
+                String relativePng = normalizedOutput.relativize(outcome.png()).toString().replace('\\', '/');
                 convertedTargets.put(target, relativePng);
-                convertedSourceFiles.put(target, sourceFile);
                 replacements.add(new Span(matcher.start(1), matcher.end(1), relativePng));
             } catch (IOException | RuntimeException exception) {
                 skipped.add("Image " + fileName + " could not be converted automatically; save it as PNG in Word.");
@@ -128,16 +188,7 @@ final class AutoPolish {
                 .forEach(span -> updated.replace(span.start(), span.end(), span.replacement()));
         String result = updated.toString();
 
-        for (var entry : convertedSourceFiles.entrySet()) {
-            if (!result.contains(entry.getKey())) {
-                try {
-                    JobStore.checkUnlinked(entry.getValue());
-                    Files.deleteIfExists(entry.getValue());
-                } catch (IOException | RuntimeException ignored) {
-                    // Keeping the original image file does not affect compilation once main.tex points to PNG.
-                }
-            }
-        }
+        // Keep converted source files on disk so restoring version 0 preserves its original image references and ZIP export.
         int count = convertedTargets.size();
         fixes.add(new Fix(
                 "image-conversion",
@@ -147,6 +198,18 @@ final class AutoPolish {
         return result;
     }
 
+    static List<String> activeMediaReferences(String source) {
+        if (source == null || source.isBlank()) return List.of();
+        String masked = maskCommentsAndLiteral(source);
+        Matcher matcher = INCLUDE_GRAPHICS.matcher(masked);
+        var targets = new ArrayList<String>();
+        while (matcher.find()) {
+            String target = matcher.group(1).strip();
+            if (!target.isEmpty()) targets.add(target);
+        }
+        return List.copyOf(targets);
+    }
+
     private static boolean isSafeMediaTarget(String target) {
         return target.startsWith("media/")
                 && !target.contains("..")
@@ -154,36 +217,45 @@ final class AutoPolish {
                 && target.codePoints().noneMatch(Character::isISOControl);
     }
 
-    private static Path convertRasterToPng(Path sourceFile, Path mediaRoot) throws IOException {
+    private static ConversionOutcome convertRasterToPng(Path sourceFile, Path mediaRoot) throws IOException {
         BufferedImage image;
         try (ImageInputStream input = ImageIO.createImageInputStream(sourceFile.toFile())) {
-            if (input == null) return null;
+            if (input == null) return new ConversionOutcome(null, null);
             Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
-            if (!readers.hasNext()) return null;
+            if (!readers.hasNext()) return new ConversionOutcome(null, null);
             ImageReader reader = readers.next();
             try {
-                reader.setInput(input, true, true);
+                // seekForwardOnly must be false so getNumImages(true) can count frames in multi-page TIFFs.
+                reader.setInput(input, false, true);
+                int imageCount = reader.getNumImages(true);
+                if (imageCount > 1) {
+                    return new ConversionOutcome(null, "Multi-page image " + sourceFile.getFileName()
+                            + " needs manual conversion; save each page as PNG in Word.");
+                }
+                if (imageCount < 1) return new ConversionOutcome(null, null);
                 int width = reader.getWidth(0);
                 int height = reader.getHeight(0);
                 if (width <= 0 || height <= 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-                    return null;
+                    return new ConversionOutcome(null, null);
                 }
                 image = reader.read(0);
             } finally {
                 reader.dispose();
             }
         }
-        if (image == null) return null;
+        if (image == null) return new ConversionOutcome(null, null);
 
         Path target = choosePngSibling(sourceFile, mediaRoot);
-        if (target == null) return null;
+        if (target == null) return new ConversionOutcome(null, null);
         Path temp = target.resolveSibling(target.getFileName() + ".tmp");
         JobStore.checkUnlinked(temp);
         try {
-            if (!writePng(image, temp)) return null;
-            if (!Files.isRegularFile(temp, LinkOption.NOFOLLOW_LINKS) || Files.size(temp) == 0) return null;
+            if (!writePng(image, temp)) return new ConversionOutcome(null, null);
+            if (!Files.isRegularFile(temp, LinkOption.NOFOLLOW_LINKS) || Files.size(temp) == 0) {
+                return new ConversionOutcome(null, null);
+            }
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE);
-            return target;
+            return new ConversionOutcome(target, null);
         } finally {
             Files.deleteIfExists(temp);
         }
