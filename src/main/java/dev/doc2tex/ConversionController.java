@@ -105,8 +105,8 @@ class ConversionController {
 
     @PostMapping(value = "/jobs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     ResponseEntity<Job> create(@RequestPart MultipartFile file, @RequestParam(defaultValue = "article") String template,
-            @RequestParam(required = false) String layout) throws IOException {
-        return ResponseEntity.accepted().body(service.submit(file, template, LayoutOptions.parse(layout)));
+            @RequestParam(required = false) String layout, @RequestParam(defaultValue = "false") boolean autoPrepare) throws IOException {
+        return ResponseEntity.accepted().body(service.submit(file, template, LayoutOptions.parse(layout), autoPrepare));
     }
 
     record LayoutCopy(@NotNull @PositiveOrZero Integer revision, @NotBlank String template, @NotNull @Valid LayoutOptions layout) {}

@@ -15,14 +15,11 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-import tools.jackson.databind.json.JsonMapper;
 
 @Service
 class ConversionService {
@@ -65,7 +62,11 @@ class ConversionService {
     }
 
     Job submit(MultipartFile file, String template, LayoutOptions layout) throws IOException {
-        return submit(file.getOriginalFilename(), file.getSize(), template, layout, "", file::transferTo);
+        return submit(file, template, layout, false);
+    }
+
+    Job submit(MultipartFile file, String template, LayoutOptions layout, boolean autoPrepare) throws IOException {
+        return submit(file.getOriginalFilename(), file.getSize(), template, layout, "", autoPrepare, file::transferTo);
     }
 
     Job deriveLayout(String id, int revision, String template, LayoutOptions layout) throws IOException {
@@ -74,12 +75,12 @@ class ConversionService {
             if (parent.revision() != revision) throw new ApiException(HttpStatus.CONFLICT, "The source changed. Reopen this document before creating a layout copy.");
             Path original = original(id);
             String name = parent.filename(); if (name.length() > 180) name = name.substring(0, 180);
-            return submit(parent.filename(), Files.size(original), template, layout, name + " · layout copy", path -> Files.copy(original, path));
+            return submit(parent.filename(), Files.size(original), template, layout, name + " · layout copy", false, path -> Files.copy(original, path));
         }
     }
 
     @FunctionalInterface private interface InputWriter { void write(Path path) throws IOException; }
-    private Job submit(String originalFilename, long size, String template, LayoutOptions layout, String displayName, InputWriter writer) throws IOException {
+    private Job submit(String originalFilename, long size, String template, LayoutOptions layout, String displayName, boolean autoPrepare, InputWriter writer) throws IOException {
         if (!List.of("article", "report").contains(template)) throw bad("Choose the article or report template.");
         if (layout == null) throw bad("Choose valid layout settings.");
         String filename = cleanFilename(originalFilename);
@@ -102,7 +103,7 @@ class ConversionService {
         Job job = new Job(id, filename, template, "QUEUED", "NOT_REQUESTED", "Waiting for a conversion worker.", "",
                 now, now, size, 0, displayName, false, layout);
         store.save(job);
-        try { executor.execute(() -> convert(id)); }
+        try { executor.execute(() -> convert(id, autoPrepare)); }
         catch (RejectedExecutionException exception) {
             store.save(job.withStatus("FAILED", "All conversion workers are busy. Try uploading again shortly."));
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "The conversion queue is full. Try again shortly.");
@@ -110,11 +111,11 @@ class ConversionService {
         return job;
     }
 
-    private void convert(String id) {
-        try (var operation = store.worker(id)) { convertLocked(id); }
+    private void convert(String id, boolean autoPrepare) {
+        try (var operation = store.worker(id)) { convertLocked(id, autoPrepare); }
     }
 
-    private void convertLocked(String id) {
+    private void convertLocked(String id, boolean autoPrepare) {
         try {
             Job job = store.get(id);
             store.save(job.withStatus("CONVERTING", "Reading document structure and writing LaTeX."));
@@ -161,8 +162,26 @@ class ConversionService {
                     + "Settings describe conversion; later manual source edits take precedence.\n"
                     + "Review equations, references and complex tables against the original.\n" + aiReview + pageReview + review + warnings);
             store.versions().initialize(store.get(id), directory, false);
-            store.save(store.get(id).withStatus("COMPLETED", result.log().isBlank()
-                    ? "LaTeX and extracted images are ready." : "LaTeX is ready. See README.txt in the ZIP for conversion messages."));
+            String readyMessage = result.log().isBlank()
+                    ? "LaTeX and extracted images are ready." : "LaTeX is ready. See README.txt in the ZIP for conversion messages.";
+            if (autoPrepare) {
+                Job readyJob = store.get(id);
+                String initialSource = new String(store.versions().current(readyJob, directory), StandardCharsets.UTF_8);
+                AutoPolish.Result polish = AutoPolish.apply(initialSource, output,
+                        WordReferenceSupport.warnings(directory.resolve("input.docx"), output));
+                AutoPolish.save(output, polish.report());
+                if (polish.changed()) {
+                    store.versions().commitAutoFix(readyJob, directory, polish.source(), store::save);
+                }
+                if (tools.available(tools.tectonic())) {
+                    store.save(store.get(id).withStatus("COMPLETED", readyMessage).withPreview("COMPILING", "Building and verifying your PDF."));
+                    compileLocked(id);
+                } else {
+                    store.save(store.get(id).withStatus("COMPLETED", readyMessage));
+                }
+            } else {
+                store.save(store.get(id).withStatus("COMPLETED", readyMessage));
+            }
         } catch (Exception exception) {
             fail(id, false, exception);
         }
@@ -231,6 +250,7 @@ class ConversionService {
         Path diagnostics = store.directory(id).resolve("compiler-diagnostics.json");
         JobStore.checkUnlinked(diagnostics);
         Files.deleteIfExists(diagnostics);
+        ReadinessCheck.deleteVerification(store.directory(id));
         store.versions().recover(job, store.directory(id));
         Job queued = job.withPreview("QUEUED", "Waiting for the PDF compiler.");
         store.save(queued);
@@ -251,6 +271,10 @@ class ConversionService {
         Path directory = store.directory(id);
         boolean logStarted = false;
         try {
+            Path diagnosticsFile = directory.resolve("compiler-diagnostics.json");
+            JobStore.checkUnlinked(diagnosticsFile);
+            Files.deleteIfExists(diagnosticsFile);
+            ReadinessCheck.deleteVerification(directory);
             Path compilerLog = directory.resolve("preview.log");
             JobStore.checkUnlinked(compilerLog);
             Files.writeString(compilerLog, "", StandardCharsets.UTF_8);
@@ -265,6 +289,12 @@ class ConversionService {
                 throw new IOException(PreviewFailure.message(result.log()));
             var diagnostics = CompilerDiagnostics.fromLog(compilerLog, job.revision(), "READY", null);
             CompilerDiagnostics.save(directory, diagnostics);
+            try {
+                var verification = ReadinessCheck.verifyPdf(directory.resolve("input.docx"), preview.resolve("main.pdf"), job.revision());
+                ReadinessCheck.saveVerification(directory, verification);
+            } catch (IOException | RuntimeException verificationError) {
+                log.warn("Could not save PDF readiness verification for {}", id, verificationError);
+            }
             boolean warnings = !diagnostics.items().isEmpty() || diagnostics.logTruncated();
             store.save(store.get(id).withPreview("READY", warnings
                     ? "PDF built with warnings. Check compiler diagnostics before using it." : "PDF preview is ready."));
@@ -309,8 +339,8 @@ class ConversionService {
     private DocumentInspector.Review reviewLocked(String id) {
         Job job = store.get(id);
         Path directory = store.directory(id);
-        Path log = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
-        var detected = inspector.review(directory.resolve("input.docx"), log);
+        Path compilerLog = List.of("READY", "FAILED").contains(job.previewStatus()) ? directory.resolve("preview.log") : null;
+        var detected = inspector.review(directory.resolve("input.docx"), compilerLog);
         var findings = new ArrayList<>(detected.findings());
         if (job.layout().aiLayout() && job.status().equals("COMPLETED")) {
             try { findings.addAll(AiLayoutReport.read(directory.resolve("output")).findings()); }
@@ -348,8 +378,9 @@ class ConversionService {
         List<ReviewDecisions.Decision> decisions = List.of(); String decisionError = "";
         try { decisions = ReviewDecisions.apply(ReviewDecisions.load(directory), evidence.items(), job.revision()); }
         catch (IOException | RuntimeException exception) { decisionError = "Saved review decisions could not be read. Back up this project's storage before repairing review-decisions.json. Detected risks and original text remain available."; }
+        var readiness = ReadinessCheck.evaluateJob(job, directory, source, findings);
         return new DocumentInspector.Review(detected.elements(), findings, detected.compilerWarnings(), List.copyOf(scripts), detected.scope(),
-                job.revision(), evidence.paragraphs(), evidence.items(), decisions, evidence.truncated(), decisionError);
+                job.revision(), evidence.paragraphs(), evidence.items(), decisions, evidence.truncated(), decisionError, readiness);
     }
 
     DocumentInspector.Review decide(String id, String findingId, int revision, String status, String fingerprint) throws IOException {
@@ -369,7 +400,7 @@ class ConversionService {
             else stored.put(findingId, new ReviewDecisions.Stored(findingId, status, revision, fingerprint, Instant.now()));
             ReviewDecisions.save(directory, stored);
             return new DocumentInspector.Review(review.elements(), review.findings(), review.compilerWarnings(), review.scripts(), review.scope(), review.revision(),
-                    review.originalText(), review.items(), ReviewDecisions.apply(stored, review.items(), revision), review.originalTruncated(), "");
+                    review.originalText(), review.items(), ReviewDecisions.apply(stored, review.items(), revision), review.originalTruncated(), "", review.readiness());
         }
     }
 
@@ -521,55 +552,10 @@ class ConversionService {
 
     private void writeArchiveLocked(String id, OutputStream stream) throws IOException {
         Job job = ready(id);
-        Path output = store.directory(id).resolve("output");
-        SourceLayout sourceLayout = null;
-        AiLayoutReport aiReport = null;
-        if (job.layout().aiLayout()) try { aiReport = AiLayoutReport.read(output); }
-        catch (IOException | RuntimeException exception) { log.warn("Cannot export the AI layout report for {}", id); }
-        if (job.layout().preserveSourceLayout()) try { sourceLayout = SourceLayout.read(output); }
-        catch (IOException | RuntimeException exception) { log.warn("Cannot export the page-layout report for {}", id); }
-        try (ZipOutputStream zip = new ZipOutputStream(stream); var paths = Files.walk(output)) {
-            zip.putNextEntry(new ZipEntry("main.tex"));
-            zip.write(store.versions().current(job, store.directory(id)));
-            zip.closeEntry();
-            zip.putNextEntry(new ZipEntry("conversion-review.json"));
-            zip.write(JsonMapper.builder().build().writeValueAsBytes(review(id)));
-            zip.closeEntry();
-            zip.putNextEntry(new ZipEntry("layout-settings.json"));
-            zip.write(JsonMapper.builder().build().writeValueAsBytes(job.layout()));
-            zip.closeEntry();
-            if (aiReport != null) {
-                zip.putNextEntry(new ZipEntry("ai-layout.json"));
-                zip.write(JsonMapper.builder().build().writeValueAsBytes(aiReport)); zip.closeEntry();
-            }
-            if (sourceLayout != null) {
-                zip.putNextEntry(new ZipEntry("source-layout.json"));
-                zip.write(JsonMapper.builder().build().writeValueAsBytes(sourceLayout));
-                zip.closeEntry();
-            }
-            var bibliography = store.versions().bibliography(job, store.directory(id), job.revision());
-            if (bibliography != null) for (var entry : bibliography.files().entrySet()) {
-                zip.putNextEntry(new ZipEntry(BibliographyAssets.FOLDER + "/" + entry.getKey())); zip.write(entry.getValue()); zip.closeEntry();
-            }
-            Path readme = output.resolve("README.txt"); JobStore.checkUnlinked(readme);
-            zip.putNextEntry(new ZipEntry("README.txt"));
-            if (Files.isRegularFile(readme)) Files.copy(readme, zip); else zip.write("Exported with doc2TeX. Keep project folders beside main.tex.\n".getBytes(StandardCharsets.UTF_8));
-            if (bibliography != null) {
-                String instructions = "\nBibliography: uploaded UTF-8 bytes are preserved as bibliography/references.bib.\n"
-                    + "Tectonic runs BibTeX automatically: tectonic main.tex\n"
-                    + "For a TeX distribution/Overleaf, use XeLaTeX + BibTeX: xelatex main.tex; bibtex main; xelatex main.tex; xelatex main.tex\n"
-                    + "Keep the bibliography folder, bundled Noto font and OFL license with the source. This export uses this saved revision's bibliography assets.\n";
-                zip.write(instructions.getBytes(StandardCharsets.UTF_8));
-            }
-            zip.closeEntry();
-            for (Path file : paths.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).sorted().toList()) {
-                String name = output.relativize(file).toString().replace('\\', '/');
-                if (!(name.startsWith("media/") || name.startsWith("fonts/"))) continue;
-                zip.putNextEntry(new ZipEntry(name));
-                Files.copy(file, zip);
-                zip.closeEntry();
-            }
-        }
+        Path directory = store.directory(id);
+        byte[] source = store.versions().current(job, directory);
+        BibliographyAssets bibliography = store.versions().bibliography(job, directory, job.revision());
+        JobArchive.write(job, directory, source, bibliography, reviewLocked(id), stream);
     }
 
     private void fail(String id, boolean preview, Exception exception) {
