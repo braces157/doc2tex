@@ -28,7 +28,9 @@ class DocLayoutModelTest {
         assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, 0, 0, 1.1f, 1, 0));
         assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, 0, Float.NaN, 1, 1, 0));
         assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, .5f, 0, .5f, 1, 0));
-        assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", .9f, 0, 0, 1, 1, -1));
+        assertThrows(IllegalArgumentException.class, () -> new DocLayoutModel.Region("text", 0, 0, 0, 1, 1, -1));
+        assertEquals("inline_formula", new DocLayoutModel.Region("inline_formula", .8f, 0, 0, .5f, .5f, 0).label());
+        assertEquals("display_formula", new DocLayoutModel.Region("display_formula", .8f, 0, 0, .5f, .5f, 1).label());
     }
 
     @Test void roundsClampsAndOrdersOriginalPixelBoxesSpatially() throws Exception {
@@ -99,7 +101,7 @@ class DocLayoutModelTest {
             try { assertThrows(InterruptedException.class, () -> detector.detect(image, 30)); }
             finally { Thread.interrupted(); }
             var regions = detector.detect(image, 30);
-            var topLine = regions.stream().filter(region -> region.top() < .15f).findFirst().orElseThrow();
+            var topLine = regions.stream().filter(region -> region.label().equals("header")).findFirst().orElseThrow();
             assertEquals(.110f, topLine.left(), .025f);
             assertEquals(.046f / .773f, topLine.top(), .025f);
             assertEquals(.466f, topLine.right(), .025f);

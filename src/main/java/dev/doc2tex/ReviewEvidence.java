@@ -94,7 +94,8 @@ final class ReviewEvidence {
                         if (header) add(originals, "headers", "Header or footer text", part.getName(), location, original, List.of(), "Word headers and footers are omitted from the converted body; no source location is assumed.");
                         if (!header && hasCaptionStyle(paragraph, ns) && CAPTION.matcher(original).matches())
                             add(originals, "captions", "Caption already contains a number", part.getName(), location, original, anchors, null);
-                        if (!header && (has(paragraph, ns, "ins") || has(paragraph, ns, "del") || ancestor(paragraph, ns, "ins") || ancestor(paragraph, ns, "del")))
+                        if (!header && (has(paragraph, ns, "ins") || has(paragraph, ns, "del") || has(paragraph, ns, "moveFrom") || has(paragraph, ns, "moveTo")
+                                || ancestor(paragraph, ns, "ins") || ancestor(paragraph, ns, "del") || ancestor(paragraph, ns, "moveFrom") || ancestor(paragraph, ns, "moveTo")))
                             add(originals, "revisions", "Tracked changes in original paragraph", part.getName(), location, original, anchors, null);
                     }
                     if (!header) {
@@ -198,7 +199,8 @@ final class ReviewEvidence {
 
     private static String text(Node node, String ns, boolean original) {
         if (node instanceof Element element && ns.equals(element.getNamespaceURI())) {
-            if (!original && (element.getLocalName().equals("del") || element.getLocalName().equals("delText") || ancestor(element, ns, "del"))) return "";
+            if (!original && (element.getLocalName().equals("del") || element.getLocalName().equals("delText")
+                    || element.getLocalName().equals("moveFrom") || ancestor(element, ns, "del") || ancestor(element, ns, "moveFrom"))) return "";
             if (element.getLocalName().equals("t") || original && element.getLocalName().equals("delText")) return element.getTextContent();
             if (element.getLocalName().equals("tab") || element.getLocalName().equals("br")) return " ";
         }

@@ -35,13 +35,18 @@ final class DocLayoutModel implements AutoCloseable {
             "content", "figure_title", "formula", "table", "table_title", "reference", "doc_title", "footnote",
             "header", "algorithm", "footer", "seal", "chart_title", "chart", "formula_number", "header_image",
             "footer_image", "aside_text");
+    private static final Set<String> VALID_REGION_LABELS = Set.of("paragraph_title", "image", "text", "number", "abstract",
+            "content", "figure_title", "formula", "table", "table_title", "reference", "doc_title", "footnote",
+            "header", "algorithm", "footer", "seal", "chart_title", "chart", "formula_number", "header_image",
+            "footer_image", "aside_text", "display_formula", "inline_formula", "reference_content", "vertical_text",
+            "vision_footnote");
     private static final Set<String> VISUAL_LABELS = Set.of("image", "table", "seal", "chart");
     private final OrtEnvironment environment;
     private final OrtSession session;
 
     record Region(String label, float confidence, float left, float top, float right, float bottom, int order) {
         Region {
-            if (label == null || !LABELS.contains(label) || !Float.isFinite(confidence) || confidence < 0 || confidence > 1
+            if (label == null || !VALID_REGION_LABELS.contains(label) || !Float.isFinite(confidence) || confidence < 0 || confidence > 1
                     || !Float.isFinite(left) || !Float.isFinite(top) || !Float.isFinite(right) || !Float.isFinite(bottom)
                     || left < 0 || top < 0 || right > 1 || bottom > 1 || left >= right || top >= bottom || order < 0) {
                 throw new IllegalArgumentException("Invalid document layout region");
