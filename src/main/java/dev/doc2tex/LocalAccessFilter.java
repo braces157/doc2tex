@@ -4,8 +4,10 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,11 +102,47 @@ class LocalAccessFilter extends OncePerRequestFilter {
         StringBuilder cleaned = new StringBuilder(uri.length());
         for (String segment : uri.split("/")) {
             int semi = segment.indexOf(';');
-            String part = semi >= 0 ? segment.substring(0, semi) : segment;
+            String raw = semi >= 0 ? segment.substring(0, semi) : segment;
+            String part = decodeSegment(raw);
             if (!part.isEmpty()) {
                 cleaned.append('/').append(part);
             }
         }
         return cleaned.isEmpty() ? "/" : cleaned.toString();
+    }
+
+    private static String decodeSegment(String raw) {
+        if (raw.indexOf('%') < 0) return raw;
+        var out = new StringBuilder(raw.length());
+        var bytes = new ByteArrayOutputStream();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '%' && i + 2 < raw.length()) {
+                int hi = Character.digit(raw.charAt(i + 1), 16);
+                int lo = Character.digit(raw.charAt(i + 2), 16);
+                if (hi >= 0 && lo >= 0) {
+                    int value = (hi << 4) | lo;
+                    if (value == '/') {
+                        flushUtf8(bytes, out);
+                        out.append(raw, i, i + 3);
+                    } else {
+                        bytes.write(value);
+                    }
+                    i += 2;
+                    continue;
+                }
+            }
+            flushUtf8(bytes, out);
+            out.append(c);
+        }
+        flushUtf8(bytes, out);
+        return out.toString();
+    }
+
+    private static void flushUtf8(ByteArrayOutputStream bytes, StringBuilder out) {
+        if (bytes.size() > 0) {
+            out.append(bytes.toString(StandardCharsets.UTF_8));
+            bytes.reset();
+        }
     }
 }

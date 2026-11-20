@@ -25,11 +25,12 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY scripts/setup-tools.sh scripts/setup-fonts.sh scripts/
-RUN sed -i 's/\r$//' scripts/setup-tools.sh scripts/setup-fonts.sh \
+RUN set -e \
+    && sed -i 's/\r$//' scripts/setup-tools.sh scripts/setup-fonts.sh \
     && bash scripts/setup-tools.sh \
     && rm -rf .tools/downloads .tools/*/upstream \
-    && missing="$(ldd /app/.tools/tectonic/tectonic | grep 'not found' || true)"; \
-       if [ -n "$missing" ]; then printf '%s\n' "$missing"; exit 1; fi \
+    && { missing="$(ldd /app/.tools/tectonic/tectonic | grep 'not found' || true)"; \
+         if [ -n "$missing" ]; then printf '%s\n' "$missing"; exit 1; fi; } \
     && /app/.tools/pandoc/pandoc --version \
     && /app/.tools/tectonic/tectonic --version
 

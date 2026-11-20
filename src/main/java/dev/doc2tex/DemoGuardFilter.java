@@ -28,19 +28,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
 class DemoGuardFilter extends OncePerRequestFilter {
     private final HostingProperties hosting;
     private final JobStore store;
-    private final DemoCleanupService cleanup;
     private final RateLimiter uploads;
     private final RateLimiter previews;
 
     @Autowired
-    DemoGuardFilter(HostingProperties hosting, JobStore store, DemoCleanupService cleanup) {
-        this(hosting, store, cleanup, Clock.systemUTC());
+    DemoGuardFilter(HostingProperties hosting, JobStore store) {
+        this(hosting, store, Clock.systemUTC());
     }
 
-    DemoGuardFilter(HostingProperties hosting, JobStore store, DemoCleanupService cleanup, Clock clock) {
+    DemoGuardFilter(HostingProperties hosting, JobStore store, Clock clock) {
         this.hosting = hosting;
         this.store = store;
-        this.cleanup = cleanup;
         Duration window = Duration.ofMinutes(hosting.rateLimitWindowMinutes());
         this.uploads = new RateLimiter(hosting.uploadsPerWindow(), window, clock);
         this.previews = new RateLimiter(hosting.previewsPerWindow(), window, clock);
@@ -106,11 +104,6 @@ class DemoGuardFilter extends OncePerRequestFilter {
         if (store.sessionCount(sessionId) >= hosting.maxJobsPerSession()) {
             writeError(response, HttpStatus.TOO_MANY_REQUESTS.value(),
                     "Demo session limit reached. Delete an older document in All documents to upload another.");
-            return false;
-        }
-        if (store.totalCount() >= hosting.maxJobs() && !cleanup.makeRoomForUpload()) {
-            writeError(response, HttpStatus.TOO_MANY_REQUESTS.value(),
-                    "The public demo workspace is temporarily full. Please try again shortly.");
             return false;
         }
         return true;

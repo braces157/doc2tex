@@ -12,6 +12,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /** Expires old demo jobs and enforces total workspace capacity when public demo mode is enabled. */
@@ -52,25 +53,33 @@ class DemoCleanupService {
     }
 
     int sweepExpired() {
-        return sweepExpired(Instant.now());
+        return sweepExpired(Instant.now(), null);
     }
 
-    synchronized int sweepExpired(Instant now) {
+    int sweepExpired(Instant now) {
+        return sweepExpired(now, null);
+    }
+
+    synchronized int sweepExpired(Instant now, String protectedJobId) {
         Instant cutoff = now.minus(Duration.ofMinutes(hosting.retentionMinutes()));
         int removed = 0;
         for (Job job : store.snapshotAll()) {
-            if (!isBusy(job) && job.updatedAt().isBefore(cutoff)) {
+            if (!isBusy(job) && !job.id().equals(protectedJobId) && job.updatedAt().isBefore(cutoff)) {
                 if (deleteQuietly(job.id())) removed++;
             }
         }
         return removed;
     }
 
-    synchronized boolean makeRoomForUpload() {
-        sweepExpired(Instant.now());
+    boolean makeRoomForUpload() {
+        return makeRoomForUpload(null);
+    }
+
+    synchronized boolean makeRoomForUpload(String protectedJobId) {
+        sweepExpired(Instant.now(), protectedJobId);
         if (store.totalCount() < hosting.maxJobs()) return true;
         List<Job> candidates = store.snapshotAll().stream()
-                .filter(job -> !isBusy(job))
+                .filter(job -> !isBusy(job) && !job.id().equals(protectedJobId))
                 .sorted(Comparator.comparing(Job::updatedAt).thenComparing(Job::id))
                 .toList();
         for (Job candidate : candidates) {
@@ -78,6 +87,21 @@ class DemoCleanupService {
             deleteQuietly(candidate.id());
         }
         return store.totalCount() < hosting.maxJobs();
+    }
+
+    synchronized void admitAndSave(Job job, String protectedJobId) throws IOException {
+        if (hosting.demoMode()) {
+            String sessionId = DemoSession.current();
+            if (sessionId != null && store.sessionCount(sessionId) >= hosting.maxJobsPerSession()) {
+                throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                        "Demo session limit reached. Delete an older document in All documents to upload another.");
+            }
+            if (store.totalCount() >= hosting.maxJobs() && !makeRoomForUpload(protectedJobId)) {
+                throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                        "The public demo workspace is temporarily full. Please try again shortly.");
+            }
+        }
+        store.save(job);
     }
 
     private boolean deleteQuietly(String id) {
