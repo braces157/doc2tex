@@ -115,14 +115,14 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 | GET | `/api/system` | Tool availability, templates, upload limit |
 | POST | `/api/system/stop` | Packaged app only: graceful shutdown with the private `X-Doc2tex-Control` token read by Stop doc2TeX.cmd; development servers return 404 |
 | GET | `/api/sample.docx` | Download the sample |
-| POST | `/api/jobs` | Multipart `file`, `template` and optional JSON-string `layout`; returns 202 and a job |
+| POST | `/api/jobs` | Multipart `file`, `template`, optional JSON-string `layout`, and optional boolean `autoPrepare` (default `false`; UI defaults to `true`); returns 202 and a job |
 | POST | `/api/jobs/{id}/layout-copy` | JSON `{ "revision": 1, "template": "report", "layout": {...} }`; creates a separate conversion from the original DOCX, returns 202 and its new job |
 | GET | `/api/jobs` | Most recent 30 jobs |
 | GET | `/api/library` | All stored jobs, filtered and paginated (see below) |
 | GET | `/api/jobs/{id}` | Conversion and preview status |
 | PATCH | `/api/jobs/{id}` | JSON `{ "displayName": "Paper draft" }`; rename without changing the original filename |
 | DELETE | `/api/jobs/{id}` | Permanently remove this document's original, source, versions, media and previews; 204 on success |
-| GET | `/api/jobs/{id}/review` | Detected source features, review flags, and PDF compiler warnings |
+| GET | `/api/jobs/{id}/review` | Detected source features, review flags, PDF compiler warnings, and plain-English `readiness` summary |
 | GET | `/api/jobs/{id}/caption-repairs` | Read-only caption proposals with exact before/after source, revision, SHA-256 source hash and manual-review warnings |
 | POST | `/api/jobs/{id}/caption-repairs` | JSON `{ "revision": 0, "sourceHash": "...", "proposalIds": ["..."] }`; applies selected current proposals as a normal saved version and returns `{job, source}` |
 | GET | `/api/jobs/{id}/source` | UTF-8 LaTeX source |
@@ -212,6 +212,8 @@ History retains up to **100 versions or 100 MiB of saved source plus bibliograph
 Source and bibliography snapshots and their byte counts/SHA-256 digests are stored outside exports in `.versions/{revision}/`. Legacy source-only snapshots remain readable. `job.properties` revision is the committed pointer. Saves atomically publish an immutable snapshot, replace the working source/asset cache, then atomically advance job metadata under the exclusive lease. File contents are forced before publication; destination directories are also forced after renames on a best-effort basis where the filesystem permits directory fsync. Canonical source reads, bibliography downloads and ZIP entries use the committed snapshot. Startup and preview preparation remove uncommitted/staged snapshots and restore `output/main.tex` and owned bibliography cache files from the committed snapshot. A project-root ownership marker prevents replacement of an unmanaged nonempty bibliography directory; unrelated files are retained. An interruption before metadata commit keeps the old revision; one after commit keeps the new one. History never comes from preview folders. Tests inject process/write interruptions; abrupt power-loss behavior has not been tested.
 
 A history recovery failure keeps the job listed and retrievable, with original DOCX download and deletion available. Source/history/save/build/ZIP operations return an actionable conflict instead of exposing or overwriting an inconsistent revision. The source-error panel provides **Download original Word document**, and any browser-local draft remains downloadable while loading fails. Original-download errors stay inline and can be retried without navigating away. Back up the job directory, inspect the server log, repair history, then restart to revalidate it. Deletion markers take precedence so recovery never recreates partially removed jobs.
+
+**Automatic polish and readiness verification:** When `autoPrepare=true` (enabled by default in the UI upload toggle **Auto-fix & verify PDF**), `AutoPolish` runs deterministic, prose-safe repairs after Pandoc finishes: removing duplicate literal figure/table caption numbers via `CaptionRepairs` and converting referenced BMP/GIF/TIFF images under `media/` to PNG (recording applied fixes and any skipped EMF/WMF/SVG vector images in `auto-polish.json`, included in ZIP exports). If any repairs changed `main.tex`, the raw Pandoc output stays preserved as version `0` (`origin: converted`) and the repaired source is committed as version `1` (`origin: auto-fixed`). When Tectonic is installed, conversion automatically builds the PDF and writes `pdf-verification.json` with page count and NFKC-normalized DOCX→PDF accepted-body text token coverage (excluding deleted tracked changes and RTL scripts). `GET /api/jobs/{id}/review` includes a plain-English `readiness` report (`ready`, `ready-with-notes`, or `needs-attention`) that clears resolved caption/image flags, highlights only genuine remaining blockers (such as embedded charts, OLE objects, missing glyphs, or failed builds), and summarizes automatic handling without claiming lossless visual fidelity.
 
 ## Configuration
 
