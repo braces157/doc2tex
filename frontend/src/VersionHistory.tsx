@@ -4,6 +4,7 @@ import { downloadBibliography } from './bibliographyDownload'
 import type { Job, SavedHistory } from './api'
 import { Button } from './components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog'
+import { computeLineDiff } from './textDiff'
 
 export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }: {
   open: boolean; onOpenChange: (value: boolean) => void; job: Job | null; disabled: boolean
@@ -19,6 +20,8 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
   const sourceRequest = useMemo(() => ({ request, revision: selected?.revision }), [request, selected?.revision])
   const [preview, setPreview] = useState<{ request: object; source: string; error: string } | null>(null)
   const source = preview?.request === sourceRequest ? preview : null
+  const [currentSnapshot, setCurrentSnapshot] = useState<{ request: object; source: string; error: string } | null>(null)
+  const [previewMode, setPreviewMode] = useState<'source' | 'diff'>('source')
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState('')
   const [downloadingBibliography, setDownloadingBibliography] = useState(false)
@@ -41,6 +44,24 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
     return () => controller.abort()
   }, [request, sourceRequest])
 
+  useEffect(() => {
+    if (!request.open || !request.id || previewMode !== 'diff' || !history) return
+    if (selected?.revision === history.currentRevision) return
+    if (currentSnapshot?.request === request) return
+    const controller = new AbortController()
+    void api<string>(`/jobs/${request.id}/versions/${history.currentRevision}/source`, { signal: controller.signal }, true)
+      .then(text => { if (!controller.signal.aborted) setCurrentSnapshot({ request, source: text, error: '' }) })
+      .catch((e: Error) => { if (!controller.signal.aborted) setCurrentSnapshot({ request, source: '', error: e.message }) })
+    return () => controller.abort()
+  }, [request, previewMode, history, selected?.revision, currentSnapshot?.request])
+
+  const diffRows = useMemo(() => {
+    if (previewMode !== 'diff' || !history || !source || source.error || !selected) return null
+    if (selected.revision === history.currentRevision) return null
+    if (currentSnapshot?.request !== request || currentSnapshot.error) return null
+    return computeLineDiff(source.source, currentSnapshot.source)
+  }, [previewMode, history, source, selected, currentSnapshot, request])
+
   const restore = async () => {
     if (!selected || restoring || disabled || !source || source.error) return
     setRestoring(true); setRestoreError('')
@@ -49,7 +70,9 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
     finally { setRestoring(false) }
   }
 
-  return <Dialog open={open} onOpenChange={value => { if (!restoring) { onOpenChange(value); setRestoreError('') } }}>
+  const canDiff = Boolean(history && selected && selected.revision !== history.currentRevision)
+
+  return <Dialog open={open} onOpenChange={value => { if (!restoring) { onOpenChange(value); setRestoreError(''); setPreviewMode('source') } }}>
     <DialogContent className="ui-versions-dialog"><DialogHeader><DialogTitle>Saved versions</DialogTitle><DialogDescription>Preview or download an earlier save. Restoring creates a new revision and requires a fresh PDF build.</DialogDescription></DialogHeader>
       {!current && <p role="status">Loading saved versions…</p>}
       {current?.error && <div role="alert"><p>{current.error}</p><Button variant="outline" onClick={() => setAttempt(value => value + 1)}>Retry versions</Button></div>}
@@ -62,9 +85,27 @@ export function VersionHistory({ open, onOpenChange, job, disabled, onRestore }:
           <time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</time>
         </button>)}</nav>
           <section className="ui-version-preview" aria-label="Version preview">
+            {canDiff && <div className="ui-version-mode-bar" role="group" aria-label="Version comparison mode">
+              <Button variant={previewMode === 'source' ? 'secondary' : 'ghost'} size="sm" onClick={() => setPreviewMode('source')}>Source</Button>
+              <Button variant={previewMode === 'diff' ? 'secondary' : 'ghost'} size="sm" onClick={() => setPreviewMode('diff')}>Diff vs current</Button>
+            </div>}
             {!source && <p role="status">Loading version source…</p>}
             {source?.error && <div role="alert"><p>{source.error}</p><Button variant="outline" onClick={() => setAttempt(value => value + 1)}>Retry version source</Button></div>}
-            {source && !source.error && <label>Version {selected?.revision} · read only<textarea readOnly aria-label="Saved version source" spellCheck={false} value={source.source} /></label>}
+            {source && !source.error && (previewMode === 'diff' && canDiff ? (
+              currentSnapshot?.request !== request ? <p role="status">Loading current version for comparison…</p>
+                : currentSnapshot.error ? <p role="alert">{currentSnapshot.error}</p>
+                  : diffRows && <div className="eco-diff-box" aria-label={`Diff between version ${selected?.revision} and version ${history.currentRevision}`}>
+                    {diffRows.truncated && <p className="eco-diff-note">Comparison truncated to first 600 lines.</p>}
+                    {diffRows.rows.map((row, idx) => (
+                      <div key={idx} className={`eco-diff-row is-${row.type}`}>
+                        <span className="eco-diff-sign">{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '}</span>
+                        <code>{row.text || ' '}</code>
+                      </div>
+                    ))}
+                  </div>
+            ) : (
+              <label>Version {selected?.revision} · read only<textarea readOnly aria-label="Saved version source" spellCheck={false} value={source.source} /></label>
+            ))}
             {selected?.bibliographyFilename && <p className="ui-version-asset-note">This version includes {selected.bibliographyFilename} ({formatBytes(selected.assetBytes ?? 0)} of bibliography/font assets). Restoring also restores those matching assets. Export the restored project to include its fonts.</p>}
           </section>
         </div>

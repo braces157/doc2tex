@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, CaretLeft, CaretRight, WarningCircle } from '@phosphor-icons/react'
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
+import { getDocument } from 'pdfjs-dist'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-
-GlobalWorkerOptions.workerSrc = workerUrl
+import './pdfWorker'
 
 export default function PdfPreview({ id, revision }: { id: string; revision: number }) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
