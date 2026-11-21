@@ -157,6 +157,28 @@ final class AiLayoutService {
         return model;
     }
 
+    boolean modelReady() {
+        return settings.enabled() && Files.isRegularFile(settings.modelPath());
+    }
+
+    List<DocLayoutModel.Region> detectPage(java.awt.image.BufferedImage image, int timeoutSeconds) {
+        if (!modelReady()) return List.of();
+        try {
+            if (!inferenceSlot.tryAcquire(Math.max(1, timeoutSeconds), TimeUnit.SECONDS)) return List.of();
+            try {
+                return model().detect(image, Math.max(1, timeoutSeconds));
+            } finally {
+                inferenceSlot.release();
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return List.of();
+        } catch (Exception | LinkageError exception) {
+            LOG.warn("AI region detection unavailable for PDF page: {}", exception.getMessage());
+            return List.of();
+        }
+    }
+
     private static int remaining(long deadline) throws IOException, InterruptedException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException("AI layout analysis interrupted.");
         long seconds = TimeUnit.NANOSECONDS.toSeconds(deadline - System.nanoTime());

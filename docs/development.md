@@ -21,6 +21,7 @@ A local DOCX → LaTeX app built with **Spring Boot 4.1.1, Java 21+, React, Type
 - Keyboard-accessible shadcn tabs, radio controls, tooltips, dialogs, toasts, and download menus.
 - Conversion review with source feature counts, layout risks, tracked-change handling, and compiler warnings.
 - Conditional Noto font bundling for tested multilingual scripts, including Thai, Chinese, Japanese, Arabic, Greek, and Cyrillic.
+- Four local workspace modes: **DOCX → LaTeX**, **PDF Studio** (inspect, merge/split/reorder/rotate, privacy scrub, watermarks, page numbers, content extraction, and digital PDF → Markdown/LaTeX/DOCX), **Format Hub** (universal Pandoc multi-format conversions, round-trip workspace exports, batch ZIP queue, 6 academic templates, and offline DOI/arXiv/ISBN `.bib` extractor), and **Compare & Clean** (side-by-side PDF text & visual pixel diff, saved-version line diff, and DOCX pre-flight cleaner).
 
 ## Run on Windows
 
@@ -141,6 +142,25 @@ This writes measurements, extracted text, reviews, PDFs, and contact sheets to `
 | POST | `/api/jobs/{id}/preview` | Queue PDF compilation |
 | GET | `/api/jobs/{id}/preview` | Current compiled PDF |
 | GET | `/api/jobs/{id}/preview/log` | Compiler output, capped at 64 KB |
+| POST | `/api/pdf/inspect` | Inspect PDF version, metadata, XMP presence, outline, page geometry, counts, and warnings |
+| POST | `/api/pdf/assemble` | Merge, split, reorder, rotate, scrub metadata/XMP, strip annotations, watermark, and number pages |
+| POST | `/api/pdf/extract/text` | Extract bounded per-page plain text from a PDF |
+| POST | `/api/pdf/extract/markdown` | Extract page-sectioned Markdown from a PDF |
+| POST | `/api/pdf/extract/images` | Extract deduplicated embedded PNG images and `manifest.json` as a ZIP |
+| POST | `/api/pdf/to-source` | Reconstruct editable Markdown or standalone LaTeX preview from a digital PDF (with optional PP-DocLayout-S region detection) |
+| POST | `/api/pdf/to-source/download` | Download reconstructed Markdown, LaTeX + media ZIP, or DOCX from a digital PDF |
+| GET | `/api/convert/formats` | Report Pandoc/LibreOffice readiness and supported input/output format catalog |
+| POST | `/api/convert` | Universal sandboxed Pandoc conversion (including legacy `.doc` via LibreOffice when installed) |
+| GET | `/api/jobs/{id}/export/{format}` | Export a committed conversion workspace project + media + bibliography to `docx`, `markdown`, `html`, `epub`, `typst`, or `pptx` |
+| POST | `/api/diff/pdf` | Compute per-page bounded line diffs and summary counts between two PDFs |
+| POST | `/api/diff/pdf/page` | Rasterize two PDF pages at 96 DPI and return base64 PNGs + pixel-highlight diff |
+| POST | `/api/docx/inspect` | Audit `.docx` archive size, embedded media bloat, comments, tracked changes, external links, and metadata |
+| POST | `/api/docx/clean` | Export a cleaned `.docx` with optional metadata scrubbing, comment removal, and image downscaling |
+| GET | `/api/templates` | List built-in Tectonic-ready academic LaTeX template presets |
+| POST | `/api/templates/generate` | Generate escaped `.tex` source from a template preset and metadata |
+| POST | `/api/templates/compile` | Generate and compile an academic template preset directly into a PDF with Tectonic |
+| POST | `/api/references/extract` | Offline scan of uploaded PDF/DOCX/text or pasted text for DOIs, arXiv IDs, ISBNs, and numbered citations into `.bib` |
+| POST | `/api/batch/convert` | Convert up to 20 files to a target format (or merge multiple PDFs) into one ZIP with isolated per-file error reporting (`batch-report.json`) |
 
 Conversions: `QUEUED → CONVERTING → COMPLETED / FAILED`.
 Previews: `NOT_REQUESTED → QUEUED → COMPILING → READY / FAILED`.
@@ -215,6 +235,8 @@ A history recovery failure keeps the job listed and retrievable, with original D
 
 **Automatic polish and readiness verification:** When `autoPrepare=true` (enabled by default in the UI upload toggle **Auto-fix & verify PDF**), `AutoPolish` runs deterministic, prose-safe repairs after Pandoc finishes: removing duplicate literal figure/table caption numbers via `CaptionRepairs` and converting referenced BMP/GIF/TIFF images under `media/` to PNG (recording applied fixes and any skipped EMF/WMF/SVG vector images in `auto-polish.json`, included in ZIP exports). If any repairs changed `main.tex`, the raw Pandoc output stays preserved as version `0` (`origin: converted`) and the repaired source is committed as version `1` (`origin: auto-fixed`). When Tectonic is installed, conversion automatically builds the PDF and writes `pdf-verification.json` with page count and NFKC-normalized DOCX→PDF accepted-body text token coverage (excluding deleted tracked changes and RTL scripts). `GET /api/jobs/{id}/review` includes a plain-English `readiness` report (`ready`, `ready-with-notes`, or `needs-attention`) that clears resolved caption/image flags, highlights only genuine remaining blockers (such as embedded charts, OLE objects, missing glyphs, or failed builds), and summarizes automatic handling without claiming lossless visual fidelity.
 
+**Local PDF Studio:** Switch to **PDF Studio** from the workspace sidebar (or mobile bar) to inspect, merge, split, reorder, rotate, clean, watermark, number, and extract text/Markdown/images from local PDFs or compiled workspace preview PDFs using Apache PDFBox 3.0.8 and PDF.js. Uploads are bounded to 20 MB per PDF, 50 MB combined per request, 20 source files, and 500 output pages; text extraction is capped at 2,000,000 characters, and image ZIP exports are capped at 200 deduplicated images / 80 MB uncompressed PNG bytes. Metadata scrubbing clears `PDDocumentInformation`, strips catalog XMP streams, and replaces trailer identifiers on the newly generated PDF; it relies on user inspection rather than claiming cryptographic redaction of embedded raster pixels.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -231,7 +253,7 @@ Worker counts, queue capacity, and timeouts are configured in `src/main/resource
 
 This is a **single-user local MVP**. It binds to `127.0.0.1` and rejects non-local origins/hosts. It has no accounts or durable queue broker. The bounded executor prevents unlimited concurrent converter processes, but it is not an operating-system sandbox. Pandoc runs with `--sandbox`; Tectonic runs with `--untrusted` and process timeouts. Before offering public uploads, put workers behind OS/container isolation with filesystem, network, CPU, memory, and disk limits, and add authentication and per-user storage.
 
-DOCX is the supported input. Legacy `.doc`, PDFs, scans, Google Docs links, bibliography reconstruction, and journal-specific templates are future work. Pandoc preserves document structure rather than exact Word page layout; review complex tables, references, floating objects, legacy embedded equations, and font/language support. A successful PDF build checks compilability, not content fidelity. The editor accepts source up to 2 MB; DOCX archives are limited to 2,000 entries and 100 MB expanded size.
+The flagship **DOCX → LaTeX** editor takes `.docx` input; **Format Hub** supports `.docx`, `.md`, `.html`, `.epub`, `.odt`, `.rtf`, `.tex`, `.rst`, `.typ`, and optional legacy `.doc` (when LibreOffice is configured), while **PDF Studio** and **Compare & Clean** process digital PDFs and `.docx` archives locally. Scanned image OCR and Google Docs links remain out of scope. Pandoc preserves document structure rather than exact Word page layout; review complex tables, references, floating objects, legacy embedded equations, and font/language support. A successful PDF build checks compilability, not content fidelity. The editor accepts source up to 2 MB; DOCX archives are limited to 2,000 entries and 100 MB expanded size.
 
 The Review tab reports common risks; it does not certify a lossless conversion. Source counts describe the original DOCX even after source edits. Tracked changes are explicitly accepted. Headers/footers, editable charts, comments, and embedded objects can require manual reconstruction. Pre-numbered captions can acquire duplicate labels. Missing glyphs and overfull layout warnings are surfaced even if the compiler exits successfully. Old conversions keep their existing source: convert them again to apply new font handling.
 

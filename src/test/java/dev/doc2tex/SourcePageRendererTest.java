@@ -85,6 +85,19 @@ class SourcePageRendererTest {
         assertEquals(2, runner.commands.size());
     }
 
+    @Test void legacyDocConversionUsesIsolatedFolderAndDocxFilter() throws Exception {
+        Path original = directory.resolve("legacy.doc"); Files.writeString(original, "legacy bytes");
+        var runner = new RendererRunner(Outcome.SUCCESS);
+        Path docx = new SourcePageRenderer(runner).convertToDocx(original, directory, "unused-native", IMAGE, 12);
+        Path render = directory.resolve("legacy-doc-source");
+        assertEquals(render.resolve("input.docx"), docx);
+        assertEquals("legacy bytes", Files.readString(render.resolve("input.doc")));
+        var command = runner.commands.getFirst();
+        assertEquals("docx", command.get(command.indexOf("--convert-to") + 1));
+        assertEquals("/work/input.doc", command.getLast());
+        assertEquals(1, runner.commands.size());
+    }
+
     private enum Outcome { SUCCESS, TIMEOUT, INTERRUPTED, EXIT_FAILURE, MISSING_PDF, OVERSIZED_PDF }
 
     private static final class RendererRunner extends ToolRunner {
@@ -110,7 +123,11 @@ class SourcePageRendererTest {
                 case OVERSIZED_PDF -> {
                     try (var file = new java.io.RandomAccessFile(render.resolve("input.pdf").toFile(), "rw")) { file.setLength(40L * 1024 * 1024 + 1); }
                 }
-                case SUCCESS -> Files.writeString(render.resolve("input.pdf"), "%PDF-1.7 fixture");
+                case SUCCESS -> {
+                    String filter = command.get(command.indexOf("--convert-to") + 1);
+                    if (filter.equals("docx")) Files.writeString(render.resolve("input.docx"), "PK\u0003\u0004fixture");
+                    else Files.writeString(render.resolve("input.pdf"), "%PDF-1.7 fixture");
+                }
             }
             return new Result(0, "");
         }

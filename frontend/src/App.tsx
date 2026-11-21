@@ -25,6 +25,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false)
   const [copied, setCopied] = useState(false)
   const [autoPrepare, setAutoPrepare] = useState(true)
+  const [mode, setMode] = useState<'convert' | 'pdf' | 'hub' | 'compare'>('convert')
   const [view, setView] = useState<'source' | 'pdf' | 'review'>('source')
   const [reviewResult, setReviewResult] = useState<{ key: string; data: ConversionReview | null; error: string } | null>(null)
   const [reviewAttempt, setReviewAttempt] = useState(0)
@@ -178,7 +179,7 @@ export default function App() {
 
   const selectFile = (next: File | undefined) => {
     if (!next) return
-    if (!next.name.toLowerCase().endsWith('.docx')) { setError('Choose a Word .docx document. PDF and .doc files are not supported yet.'); return }
+    if (!next.name.toLowerCase().endsWith('.docx')) { setError('Choose a Word .docx document. For PDFs or legacy .doc files, switch to PDF Studio or Format Hub.'); return }
     if (next.size === 0 || next.size > MAX_FILE) { setError('Choose a non-empty DOCX file smaller than 20 MB.'); return }
     setError(''); setFile(next)
   }
@@ -207,7 +208,10 @@ export default function App() {
   }
 
   const openJob = async (next: Job) => {
-    if (switchingDisabled || next.id === job?.id || !(await discardChanges())) return
+    if (switchingDisabled) return
+    if (next.id === job?.id) { setMode('convert'); return }
+    if (!(await discardChanges())) return
+    setMode('convert')
     navigationVersion.current++
     currentId.current = next.id
     autoLandPreviewId.current = null
@@ -236,6 +240,7 @@ export default function App() {
 
   const reset = async () => {
     if (switchingDisabled || !(await discardChanges())) return
+    setMode('convert')
     navigationVersion.current++
     currentId.current = null
     autoLandPreviewId.current = null
@@ -439,6 +444,7 @@ export default function App() {
   }, [])
 
   const shortcut = useEffectEvent((event: KeyboardEvent) => {
+      if (mode !== 'convert') return
       const modifier = commandKey === '⌘' ? event.metaKey : event.ctrlKey
       if (!modifier || event.altKey || event.shiftKey || event.repeat || event.defaultPrevented
         || event.isComposing || event.keyCode === 229 || composition.current.active
@@ -458,7 +464,7 @@ export default function App() {
 
   return <>
     <WorkspaceView model={{ system, setSystem, history, job, file, template, layout, setLayout, copyLayout, source, sourceLoading, error, saving,
-      dragging, copied, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
+      dragging, copied, mode, setMode, view, dirty, converting, compiling, switchingDisabled, completed, readyForActions, review,
       autoPrepare, setAutoPrepare,
       sourceError: sourceDocument.loadError, storageError: sourceDocument.storageError,
       recovery: sourceDocument.recovery, sourceRevision: sourceDocument.revision,

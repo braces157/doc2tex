@@ -1,0 +1,65 @@
+/* ---------- 2x2 Studio Mode Switcher ---------- */
+.ui-studio-nav { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:3px; }
+.ui-studio-nav button { min-width:0; height:30px; font-size:10.5px; letter-spacing:-0.015em; padding:0 4px; gap:3px; justify-content:flex-start; overflow:hidden; text-overflow:ellipsis; }
+.ui-studio-nav button svg { flex-shrink:0; }
+
+@media (max-width:640px) {
+  .ui-mobile-studio-nav { grid-template-columns:1fr 1fr; gap:5px; }
+  .ui-mobile-studio-nav button { height:30px; font-size:12px; }
+}
+
+/* ---------- Ecosystem Shared Layouts ---------- */
+.eco-stack { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.eco-two-col { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; }
+.eco-compact-drop { min-height:240px; }
+.eco-controls-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.eco-btn-group { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+
+.eco-select-label { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; font-weight:550; color:var(--subtle); }
+.eco-select, .eco-select-label select { height:32px; max-width:100%; padding:0 10px; border:1px solid var(--border-strong); border-radius:6px; background:var(--background); font-size:13px; color:var(--foreground); }
+.eco-small-textarea { width:100%; padding:8px 10px; border:1px solid var(--border-strong); border-radius:6px; background:var(--background); font-size:13px; color:var(--foreground); resize:vertical; }
+.eco-code-preview { width:100%; height:220px; padding:10px; border:0; background:var(--background); color:var(--foreground); font:12px/1.55 var(--font-mono); resize:vertical; }
+
+.eco-card-block, .eco-pick-card { display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); min-width:0; }
+.eco-card-block h2, .eco-card-block h3, .eco-pick-card h3 { margin:0; font-size:14.5px; font-weight:600; color:var(--foreground); }
+.eco-pick-card p { margin:0; font-size:12.5px; color:var(--muted-foreground); overflow-wrap:anywhere; }
+.eco-field-pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.eco-hint { display:flex; align-items:flex-start; gap:6px; margin:2px 0 0; font-size:12px; line-height:1.45; color:var(--muted-foreground); }
+.eco-hint svg { flex-shrink:0; margin-top:2px; }
+
+.eco-summary-banner { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 12px; border:1px solid var(--success-border); border-radius:8px; background:var(--success-soft); font-size:12.5px; color:var(--subtle); }
+.eco-file-list { display:flex; flex-direction:column; gap:8px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.eco-file-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--background); }
+.eco-file-row > div:first-child { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.eco-file-row strong { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.eco-file-row small { font-size:11.5px; color:var(--muted-foreground); }
+
+/* ---------- Diff & Visual Overlay ---------- */
+.ui-version-mode-bar { display:flex; gap:6px; margin-bottom:4px; }
+.eco-page-pills { display:flex; gap:6px; flex-wrap:wrap; }
+.eco-page-pill { padding:5px 10px; border:1px solid var(--border); border-radius:999px; background:var(--background); font:500 12px var(--font-mono); color:var(--subtle); }
+.eco-page-pill.is-changed { border-color:var(--warning-border); background:var(--warning-soft); color:var(--warning); }
+.eco-page-pill[aria-current=page] { border-color:var(--primary); background:var(--primary-soft); color:var(--primary-ink); box-shadow:0 0 0 1px var(--primary); }
+
+.eco-diff-box { max-height:320px; overflow:auto; border:1px solid var(--border); border-radius:6px; background:var(--background); font:12px/1.55 var(--font-mono); }
+.eco-diff-note { margin:0; padding:8px 10px; font-size:12px; color:var(--muted-foreground); }
+.eco-diff-row { display:flex; gap:8px; padding:2px 10px; border-bottom:1px solid rgb(226 221 211 / .45); white-space:pre-wrap; overflow-wrap:anywhere; }
+.eco-diff-row:last-child { border-bottom:0; }
+.eco-diff-row.is-add { background:var(--success-soft); color:var(--success); }
+.eco-diff-row.is-del { background:var(--danger-soft); color:var(--danger); }
+.eco-diff-sign { flex-shrink:0; width:12px; font-weight:700; user-select:none; }
+
+.eco-visual-diff { display:flex; flex-direction:column; gap:10px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.eco-visual-diff h3 { margin:0; font-size:14px; font-weight:600; }
+.eco-visual-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+.eco-visual-grid figure { margin:0; display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--background); }
+.eco-visual-grid figcaption { font-size:12px; font-weight:550; color:var(--subtle); }
+.eco-visual-grid img { width:100%; height:auto; display:block; border:1px solid var(--border); border-radius:4px; }
+
+@media (max-width:960px) {
+  .eco-two-col, .eco-visual-grid { grid-template-columns:1fr; }
+}
+
+@media (max-width:640px) {
+  .eco-field-pair { grid-template-columns:1fr; }
+}

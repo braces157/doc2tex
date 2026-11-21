@@ -1,6 +1,6 @@
 # Customer-focused product roadmap
 
-Created: 16 October 2026. Status: implementation in progress; see the progress ledger for delivered work and verification evidence.
+Created: 16 October 2026. Status: implementation in progress; see the progress ledger for delivered work and verification evidence. For post-R10 Docs & PDF ecosystem expansion (`E01`–`E05`), see [the ecosystem roadmap](ecosystem-roadmap.md).
 
 ## Product decision
 
