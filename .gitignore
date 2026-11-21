@@ -33,4 +33,7 @@ playwright-report/
 test-results/
 .venv/
 .vscode/
+.audit/
+.wt/
+.taste-skill/
 Thumbs.db

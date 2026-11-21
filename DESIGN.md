@@ -16,7 +16,7 @@
 - **Code / Mono (`--font-mono`):** `"Geist Mono Variable", "Cascadia Code", "Consolas", monospace` (13px editor, `tabular-nums` for line/count metrics)
 
 ## Layout, Elevation & Motion
-- **Shell:** 248px sticky sidebar + fluid main workspace (`max-width: 1560px`). Once a document is loaded, `1 Source document` collapses to a compact header strip so `2 LaTeX output` uses the full width.
+- **Shell:** 248px sticky sidebar (with `DOCX → LaTeX` / `PDF Studio` / `Format Hub` / `Compare & Clean` 2x2 mode switcher and mobile switcher strip) + fluid main workspace (`max-width: 1560px`). Once a document is loaded, `1 Source document` collapses to a compact header strip so `2 LaTeX output` uses the full width.
 - **Overlays:** Modals and dropdowns use opaque `--background` / `--popover` surfaces (`z-index: 50`) over a `z-index: 40` backdrop.
 - **Motion:** 150ms color/border transitions; all animations disabled under `prefers-reduced-motion: reduce`.
 

@@ -29,6 +29,9 @@ Upload a document, choose Article or Report, and get a verified PDF preview righ
 - **Guided review when you need details.** The Review tab remains available for source feature counts, side-by-side original text comparisons, per-finding review decisions, manual caption repair previews, and compiler logs.
 - **Multilingual exports.** Conditional Noto fonts cover the tested Latin, Vietnamese, Greek, Cyrillic, Thai, Chinese, Japanese, and Arabic samples. Font licenses travel with the export.
 - **A quiet local workspace.** Documents and conversion history stay on disk. A bounded queue handles conversions in the background, with history restored after restart.
+- **Local PDF Studio.** Switch to **PDF Studio** in the sidebar to inspect PDF metadata/bookmarks, merge, split, reorder, rotate, scrub hidden metadata/annotations, add watermarks or page numbers, extract plain text/Markdown/embedded PNGs, and convert digital PDFs to editable Markdown, LaTeX + media ZIP, or DOCX without leaving your machine.
+- **Format Hub & Academic Suite.** Switch to **Format Hub** for universal offline Pandoc conversions (Markdown, HTML, EPUB, ODT, RTF, LaTeX, Beamer, PowerPoint, Typst, and optional legacy `.doc`), round-trip workspace exports (`LaTeX → DOCX / MD / HTML / EPUB / Typst / PPTX`), batch ZIP processing with isolated per-file errors, 6 Tectonic-ready academic templates, and offline DOI/arXiv/ISBN `.bib` extraction.
+- **Compare & Clean.** Switch to **Compare & Clean** for side-by-side PDF text & pixel-highlight visual diffs, line-level saved-version diffs inside Saved versions, and `.docx` pre-flight cleaning (scrub metadata, remove comments, downscale oversized media).
 - **A considered interface.** React, TypeScript, shadcn/Radix, keyboard controls, responsive layouts, and a PDF.js canvas viewer.
 
 <details>
@@ -85,7 +88,7 @@ See the [measured results, visual verification, and remaining limits](docs/conve
 
 **This is a single-user local application.** It binds to loopback by default and checks local hosts/origins. It does not provide accounts, an OS worker sandbox, or a public upload service. See the [security model](SECURITY.md) before changing deployment assumptions.
 
-**DOCX is the supported input.** PDF, scanned documents, legacy `.doc`, and Google Docs links are not supported. Conversion preserves structure; exact Word pagination, editable charts, headers/footers, comments, complex tables, bidirectional layout, and unusual scripts can require manual work. Tracked changes are accepted. Review the generated source and PDF before sharing them.
+**Flagship DOCX → LaTeX vs ecosystem tools.** The main publishing editor starts from `.docx`; **Format Hub** supports multi-format offline inputs (`.docx`, `.doc` when LibreOffice is set up, `.md`, `.html`, `.epub`, `.odt`, `.rtf`, `.tex`, `.rst`, `.typ`); **PDF Studio** and **Compare & Clean** operate on digital PDFs and `.docx` archives locally. Scanned image OCR and Google Docs links are not supported. Conversion preserves structure; exact Word pagination, editable charts, headers/footers, comments, complex tables, bidirectional layout, and unusual scripts can require manual work. Tracked changes are accepted. Review the generated source and PDF before sharing them.
 
 ## Build and develop
 
@@ -112,7 +115,7 @@ downloaded tools live in .tools/  (Git-ignored)
 
 Read the [development guide](docs/development.md) for API routes, settings, persistence, and verification commands. Contributions are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
-For proposed features, priorities, and implementation tasks for future agents, see the [customer-focused roadmap](docs/roadmap.md).
+For proposed features, priorities, and implementation tasks for future agents, see the [customer-focused roadmap](docs/roadmap.md) and the [docs & PDF ecosystem roadmap](docs/ecosystem-roadmap.md).
 
 ## License
 
