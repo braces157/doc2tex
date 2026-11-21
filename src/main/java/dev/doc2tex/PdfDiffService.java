@@ -210,10 +210,11 @@ class PdfDiffService {
 
     private static BufferedImage renderPageBounded(PDDocument doc, int pageIndex) throws IOException {
         var page = doc.getPage(pageIndex);
-        PDRectangle box = PdfStudioStamper.visibleBox(page);
-        float userUnit = page.getUserUnit() > 0f ? page.getUserUnit() : 1f;
-        float widthPt = Math.max(1f, box.getWidth() * userUnit);
-        float heightPt = Math.max(1f, box.getHeight() * userUnit);
+        PDRectangle cropBox = page.getCropBox();
+        PDRectangle visibleBox = PdfStudioStamper.visibleBox(page);
+        // PDFBox PDFRenderer sizes the bitmap directly from the raw crop box without applying /UserUnit.
+        float widthPt = Math.max(1f, Math.max(cropBox.getWidth(), visibleBox.getWidth()));
+        float heightPt = Math.max(1f, Math.max(cropBox.getHeight(), visibleBox.getHeight()));
         float longestPt = Math.max(widthPt, heightPt);
         float dpi = Math.min(RENDER_DPI, 1800f * 72f / longestPt);
         if (dpi < 0.5f) {

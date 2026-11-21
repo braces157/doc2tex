@@ -27,11 +27,13 @@ export function PdfToSourceTab({
   const [targetFormat, setTargetFormat] = useState<'markdown' | 'latex'>('markdown')
   const [useAiLayout, setUseAiLayout] = useState(true)
   const [result, setResult] = useState<{ docUid: string; data: PdfToSourceResult } | null>(null)
+  const [downloadWarnings, setDownloadWarnings] = useState<{ docUid: string; items: string[] } | null>(null)
   const [copied, setCopied] = useState(false)
 
   const runConvert = async () => {
     if (!activeDoc) return
     onError('')
+    setDownloadWarnings(null)
     onBusyChange(`Converting ${activeDoc.file.name} to editable ${targetFormat === 'latex' ? 'LaTeX' : 'Markdown'}…`)
     try {
       const data = await convertPdfToSource(activeDoc.file, targetFormat, useAiLayout, activeDoc.password)
@@ -51,7 +53,14 @@ export function PdfToSourceTab({
     try {
       const dl = await downloadPdfToSource(activeDoc.file, downloadFormat, useAiLayout, activeDoc.password)
       downloadBlob(dl.blob, dl.filename)
-      toast.success(`Downloaded ${dl.filename}`)
+      if (dl.warnings) {
+        const items = dl.warnings.split(' | ').map(s => s.trim()).filter(Boolean)
+        setDownloadWarnings({ docUid: activeDoc.uid, items })
+        toast.warning(`Downloaded ${dl.filename} with notes: ${dl.warnings}`)
+      } else {
+        setDownloadWarnings(null)
+        toast.success(`Downloaded ${dl.filename}`)
+      }
     } catch (failure) {
       onError(failure instanceof Error ? failure.message : 'Could not download converted document.')
     } finally {
@@ -72,6 +81,10 @@ export function PdfToSourceTab({
   }
 
   const activeResult = result && result.docUid === activeDoc?.uid ? result.data : null
+  const displayedWarnings = Array.from(new Set([
+    ...(downloadWarnings && downloadWarnings.docUid === activeDoc?.uid ? downloadWarnings.items : []),
+    ...(activeResult?.warnings ?? []),
+  ]))
 
   return (
     <div className="eco-stack">
@@ -135,11 +148,11 @@ export function PdfToSourceTab({
             <div><strong>{activeResult.format.toUpperCase()}</strong><span>Output</span></div>
           </div>
 
-          {activeResult.warnings.length > 0 && (
+          {displayedWarnings.length > 0 && (
             <div className="pdf-warnings-box" aria-label="Conversion notes">
               <h3>Conversion notes</h3>
               <ul>
-                {activeResult.warnings.map((w, idx) => (
+                {displayedWarnings.map((w, idx) => (
                   <li key={idx}><Info size={15} /><span>{w}</span></li>
                 ))}
               </ul>

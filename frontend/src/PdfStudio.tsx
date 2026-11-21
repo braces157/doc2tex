@@ -44,6 +44,7 @@ function makePages(doc: LoadedPdf, inspection: PdfInspection): OrganizerPage[] {
 export default function PdfStudio({ history }: { history: Job[] }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const docsRef = useRef<LoadedPdf[]>([])
+  const liveDocUidsRef = useRef<Set<string>>(new Set())
   const inspectionTokensRef = useRef<Map<string, number>>(new Map())
   const inspectionSeqRef = useRef(0)
   const [docs, setDocs] = useState<LoadedPdf[]>([])
@@ -88,13 +89,14 @@ export default function PdfStudio({ history }: { history: Job[] }) {
   )
 
   const inspectEntry = async (entry: LoadedPdf, password?: string) => {
+    if (!liveDocUidsRef.current.has(entry.uid)) return
     const token = ++inspectionSeqRef.current
     inspectionTokensRef.current.set(entry.uid, token)
     setDocs(prev => prev.map(item =>
       item.uid === entry.uid ? { ...item, loading: true, error: '', needsPassword: false } : item))
     try {
       const inspection = await inspectPdf(entry.file, password)
-      if (inspectionTokensRef.current.get(entry.uid) !== token) return
+      if (!liveDocUidsRef.current.has(entry.uid) || inspectionTokensRef.current.get(entry.uid) !== token) return
       setDocs(prev => prev.map(item =>
         item.uid === entry.uid
           ? { ...item, loading: false, password, inspection, needsPassword: false, error: '' }
@@ -104,7 +106,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
         ...makePages(entry, inspection),
       ])
     } catch (failure) {
-      if (inspectionTokensRef.current.get(entry.uid) !== token) return
+      if (!liveDocUidsRef.current.has(entry.uid) || inspectionTokensRef.current.get(entry.uid) !== token) return
       const message = failure instanceof Error ? failure.message : 'Could not inspect this PDF.'
       const needsPassword = message.toLowerCase().includes('password')
       setDocs(prev => prev.map(item =>
@@ -141,6 +143,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
     }
 
     if (accepted.length === 0) return
+    for (const entry of accepted) liveDocUidsRef.current.add(entry.uid)
     setDocs(prev => [...prev, ...accepted])
     if (!selectedDocUid) setSelectedDocUid(accepted[0].uid)
     if (docs.length === 0 && accepted.length === 1) {
@@ -149,7 +152,10 @@ export default function PdfStudio({ history }: { history: Job[] }) {
     } else {
       setOutputName('assembled.pdf')
     }
-    for (const entry of accepted) await inspectEntry(entry)
+    for (const entry of accepted) {
+      if (!liveDocUidsRef.current.has(entry.uid)) continue
+      await inspectEntry(entry)
+    }
   }
 
   const importWorkspaceJob = async (job: Job) => {
@@ -170,6 +176,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
   }
 
   const removeDoc = (uid: string) => {
+    liveDocUidsRef.current.delete(uid)
     inspectionTokensRef.current.delete(uid)
     const target = docs.find(item => item.uid === uid)
     if (target) releasePdfProxy(target.file)
@@ -182,6 +189,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
   }
 
   const clearAll = () => {
+    liveDocUidsRef.current.clear()
     inspectionTokensRef.current.clear()
     for (const doc of docs) releasePdfProxy(doc.file)
     setDocs([])

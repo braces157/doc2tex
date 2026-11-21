@@ -97,8 +97,17 @@ class PdfStudioController {
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString());
         if (dl.warnings() != null && !dl.warnings().isEmpty()) {
-            String headerWarn = String.join(" | ", dl.warnings()).replaceAll("[\\r\\n\\p{Cntrl}]+", " ").trim();
-            if (headerWarn.length() > 300) headerWarn = headerWarn.substring(0, 300) + "...";
+            // Prioritize image/content omission warnings first so earlier informational notes never truncate them.
+            java.util.List<String> ordered = new java.util.ArrayList<>(dl.warnings().size());
+            for (String w : dl.warnings()) {
+                String lower = w.toLowerCase(java.util.Locale.ROOT);
+                if (lower.contains("omitted") || lower.contains("skipped") || lower.contains("limit")) ordered.add(w);
+            }
+            for (String w : dl.warnings()) {
+                if (!ordered.contains(w)) ordered.add(w);
+            }
+            String headerWarn = String.join(" | ", ordered).replaceAll("[\\r\\n\\p{Cntrl}]+", " ").trim();
+            if (headerWarn.length() > 2048) headerWarn = headerWarn.substring(0, 2045) + "...";
             builder.header("X-Doc2TeX-Warnings", headerWarn);
         }
         return builder.body(dl.bytes());

@@ -7,9 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -254,26 +256,33 @@ class PdfStudioService {
         page.setMetadata(null);
         page.getCOSObject().removeItem(COSName.PIECE_INFO);
         COSBase resources = page.getCOSObject().getDictionaryObject(COSName.RESOURCES);
-        scrubMetadataTree(resources, visited, 0);
+        scrubMetadataTree(resources, visited);
     }
 
-    private static void scrubMetadataTree(COSBase node, Set<COSBase> visited, int depth) {
-        if (node == null || depth > 8) return;
-        if (node instanceof COSObject obj) {
-            node = obj.getObject();
-            if (node == null) return;
-        }
-        if (!visited.add(node)) return;
-        if (node instanceof COSDictionary dict) {
-            dict.removeItem(COSName.METADATA);
-            dict.removeItem(COSName.PIECE_INFO);
-            for (COSName key : List.copyOf(dict.keySet())) {
-                if (COSName.PARENT.equals(key)) continue;
-                scrubMetadataTree(dict.getDictionaryObject(key), visited, depth + 1);
+    private static void scrubMetadataTree(COSBase root, Set<COSBase> visited) {
+        if (root == null) return;
+        Deque<COSBase> queue = new ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            COSBase node = queue.poll();
+            if (node instanceof COSObject obj) {
+                node = obj.getObject();
+                if (node == null) continue;
             }
-        } else if (node instanceof COSArray arr) {
-            for (int i = 0; i < arr.size(); i++) {
-                scrubMetadataTree(arr.getObject(i), visited, depth + 1);
+            if (!visited.add(node)) continue;
+            if (node instanceof COSDictionary dict) {
+                dict.removeItem(COSName.METADATA);
+                dict.removeItem(COSName.PIECE_INFO);
+                for (COSName key : List.copyOf(dict.keySet())) {
+                    if (COSName.PARENT.equals(key) || COSName.P.equals(key)) continue;
+                    COSBase child = dict.getDictionaryObject(key);
+                    if (child != null) queue.add(child);
+                }
+            } else if (node instanceof COSArray arr) {
+                for (int i = 0; i < arr.size(); i++) {
+                    COSBase item = arr.getObject(i);
+                    if (item != null) queue.add(item);
+                }
             }
         }
     }

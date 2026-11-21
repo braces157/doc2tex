@@ -295,26 +295,39 @@ class PdfToSourceTest {
                 List.of("Top Title", "Upper Left", "Upper Right", "Mid Spanning Section", "Lower Left", "Lower Right"),
                 orderedTexts);
 
-        // 2. Distinct numeric body values near top margin must NOT be stripped as repeated headers.
+        // 2. Distinct numeric body values near top margin (both "Result: 10 mg" and leading "10 mg") must NOT be stripped.
         var page1 = new PdfLayoutExtractor.PageLines(1, 612f, 792f, List.of(
-                new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 10 mg", 0)));
+                new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 10 mg", 0),
+                new PdfLayoutExtractor.TextLine(72, 54, 60, 10, 10, false, "10 mg", 0),
+                new PdfLayoutExtractor.TextLine(72, 760, 140, 9, 9, false, "1 | Chapter Title", 0)));
         var page2 = new PdfLayoutExtractor.PageLines(2, 612f, 792f, List.of(
-                new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 20 mg", 0)));
+                new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 20 mg", 0),
+                new PdfLayoutExtractor.TextLine(72, 54, 60, 10, 10, false, "20 mg", 0),
+                new PdfLayoutExtractor.TextLine(72, 760, 140, 9, 9, false, "2 | Chapter Title", 0)));
         var repeated = PdfLayoutExtractor.detectRepeatedMargins(List.of(page1, page2));
-        assertTrue(repeated.isEmpty(), "Distinct numeric content must not be collapsed into a repeated margin: " + repeated);
+        assertEquals(java.util.Set.of("# | chapter title"), repeated,
+                "Only genuine running headers/page numbers should collapse, never distinct numeric body lines");
 
-        // 3. More than 60 distinct small images must report an omission warning.
+        // 3. More than 60 distinct small images + repeated headers must report omission warnings in both preview and DOCX download header.
         byte[] manyImagesPdf;
         try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDType1Font regular = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
             PDPage page = new PDPage(PDRectangle.LETTER);
             doc.addPage(page);
             try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                drawLine(cs, regular, 9, 72, 760, "Journal Draft Running Header 1");
+                drawLine(cs, regular, 10, 72, 680, "Body text accompanying sixty-one figures.");
                 for (int i = 0; i < 61; i++) {
                     BufferedImage img = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
                     img.setRGB(0, 0, i * 1000 + 1);
                     PDImageXObject ximg = LosslessFactory.createFromImage(doc, img);
-                    cs.drawImage(ximg, 20 + (i % 10) * 10, 700 - (i / 10) * 10, 4, 4);
+                    cs.drawImage(ximg, 20 + (i % 10) * 10, 620 - (i / 10) * 10, 4, 4);
                 }
+            }
+            PDPage p2 = new PDPage(PDRectangle.LETTER);
+            doc.addPage(p2);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, p2)) {
+                drawLine(cs, regular, 9, 72, 760, "Journal Draft Running Header 2");
             }
             doc.save(out);
             manyImagesPdf = out.toByteArray();
@@ -330,5 +343,20 @@ class PdfToSourceTest {
         assertNotNull(manyRes);
         assertEquals(60, manyRes.imagesExtracted());
         assertTrue(manyRes.warnings().stream().anyMatch(w -> w.contains("60-figure limit")), manyRes.warnings().toString());
+
+        assumeTrue(tools.available(tools.pandoc()));
+        var dlParts = new LinkedMultiValueMap<String, Object>();
+        dlParts.add("file", pdfPart("many-figs.pdf", manyImagesPdf));
+        dlParts.add("targetFormat", "docx");
+        dlParts.add("aiLayout", "true");
+        var docxDownload = client().post().uri("/api/pdf/to-source/download")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(dlParts)
+                .retrieve()
+                .toEntity(byte[].class);
+        assertEquals(HttpStatus.OK, docxDownload.getStatusCode());
+        String warnHeader = docxDownload.getHeaders().getFirst("X-Doc2TeX-Warnings");
+        assertNotNull(warnHeader, "Download response must include X-Doc2TeX-Warnings header");
+        assertTrue(warnHeader.contains("60-figure limit"), "Image-omission warning must not be truncated by earlier notes: " + warnHeader);
     }
 }

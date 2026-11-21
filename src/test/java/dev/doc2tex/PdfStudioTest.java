@@ -479,17 +479,35 @@ class PdfStudioTest {
             parentPages.setItem(COSName.RESOURCES, leafRes);
             page.getCOSObject().removeItem(COSName.RESOURCES);
 
-            // Attach page-level XMP metadata.
+            // Attach page-level XMP metadata AND deeply nested (10-level) Form XObject resource XMP metadata.
             PDMetadata pageMeta = new PDMetadata(doc);
             pageMeta.importXMPMetadata("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">AuthorSecretXmp</x:xmpmeta>"
                     .getBytes(StandardCharsets.UTF_8));
             page.setMetadata(pageMeta);
 
+            var deepestForm = new org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject(doc);
+            deepestForm.setBBox(new PDRectangle(10, 10));
+            PDMetadata deepMeta = new PDMetadata(doc);
+            deepMeta.importXMPMetadata("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">DeepNestedResourceSecret</x:xmpmeta>"
+                    .getBytes(StandardCharsets.UTF_8));
+            deepestForm.getCOSObject().setItem(COSName.METADATA, deepMeta);
+            var currentForm = deepestForm;
+            for (int level = 0; level < 9; level++) {
+                var wrapper = new org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject(doc);
+                wrapper.setBBox(new PDRectangle(10, 10));
+                var formRes = new org.apache.pdfbox.pdmodel.PDResources();
+                formRes.put(COSName.getPDFName("Nested" + level), currentForm);
+                wrapper.setResources(formRes);
+                currentForm = wrapper;
+            }
+            var parentRes = new org.apache.pdfbox.pdmodel.PDResources((org.apache.pdfbox.cos.COSDictionary) leafRes);
+            parentRes.put(COSName.getPDFName("DeepRoot"), currentForm);
+
             doc.save(out);
             sourcePdf = out.toByteArray();
         }
 
-        // 1. Scrub enabled: text via inherited resources survives, page-level XMP is stripped.
+        // 1. Scrub enabled: text via inherited resources survives, page-level & deep resource XMP are stripped.
         var scrubbedParts = new LinkedMultiValueMap<String, Object>();
         scrubbedParts.add("files", pdfPart("inherited.pdf", sourcePdf));
         scrubbedParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
@@ -504,9 +522,13 @@ class PdfStudioTest {
             String extracted = new PDFTextStripper().getText(outDoc);
             assertTrue(extracted.contains("Inherited Font Resource Proof"), extracted);
             assertNull(outDoc.getPage(0).getMetadata(), "Page-level XMP metadata must be scrubbed when enabled");
+            var deepOut = unwrapNestedForm(outDoc.getPage(0).getResources());
+            assertNotNull(deepOut, "Deep nested form XObject must remain present");
+            assertNull(deepOut.getCOSObject().getDictionaryObject(COSName.METADATA),
+                    "Deeply nested Form XObject /Metadata must be scrubbed when scrubMetadata=true");
         }
 
-        // 2. Scrub disabled: page-level XMP is preserved.
+        // 2. Scrub disabled: page-level & deep nested resource XMP are preserved.
         var keepParts = new LinkedMultiValueMap<String, Object>();
         keepParts.add("files", pdfPart("inherited.pdf", sourcePdf));
         keepParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
@@ -519,6 +541,20 @@ class PdfStudioTest {
         assertNotNull(keptBytes);
         try (PDDocument outDoc = Loader.loadPDF(keptBytes)) {
             assertNotNull(outDoc.getPage(0).getMetadata(), "Page-level XMP metadata must remain when scrubMetadata=false");
+            var deepOut = unwrapNestedForm(outDoc.getPage(0).getResources());
+            assertNotNull(deepOut);
+            assertNotNull(deepOut.getCOSObject().getDictionaryObject(COSName.METADATA),
+                    "Deeply nested Form XObject /Metadata must remain when scrubMetadata=false");
         }
+    }
+
+    private static org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject unwrapNestedForm(
+            org.apache.pdfbox.pdmodel.PDResources rootRes) throws Exception {
+        var current = (org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject) rootRes.getXObject(COSName.getPDFName("DeepRoot"));
+        for (int level = 8; level >= 0; level--) {
+            current = (org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject)
+                    current.getResources().getXObject(COSName.getPDFName("Nested" + level));
+        }
+        return current;
     }
 }

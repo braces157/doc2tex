@@ -362,8 +362,10 @@ final class PdfLayoutExtractor {
 
     private static final Pattern PURE_PAGE_NUMBER = Pattern.compile("^[-–—|•·\\s]*\\d{1,5}[-–—|•·\\s]*$");
     private static final Pattern EXPLICIT_PAGE_NUMBER = Pattern.compile("(?i)\\b(page|p\\.|pp\\.)\\s*\\d{1,5}(?:\\s*(?:of|/)\\s*\\d{1,5})?\\b");
-    private static final Pattern LEADING_HEADER_PAGE_NUM = Pattern.compile("^\\d{1,4}(?=(?:\\s*[-–—|•·]\\s*|\\s+)[A-Za-z])");
-    private static final Pattern TRAILING_HEADER_PAGE_NUM = Pattern.compile("(?<![:=$€£¥±<>~\\d])(?:\\s*[-–—|•·]\\s*|\\s+)\\d{1,4}$");
+    private static final Pattern LEADING_HEADER_PAGE_NUM = Pattern.compile(
+            "^\\d{1,4}(?=(?:\\s*[-–—|•·]\\s*|\\s{2,})[A-Za-z]|\\s+[A-Z][a-z]{2,})");
+    private static final Pattern TRAILING_HEADER_PAGE_NUM = Pattern.compile(
+            "(?<![:=$€£¥±<>~\\d])(?:\\s*[-–—|•·]\\s*|\\s+)\\d{1,4}$");
 
     private static String normalizeMarginKey(String text) {
         String trimmed = text.trim();

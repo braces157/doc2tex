@@ -256,3 +256,52 @@ test('switching between DOCX to LaTeX and PDF Studio preserves unsaved LaTeX edi
   await expect(editor).toContainText('% UNSAVED_ECO_EDIT')
   await expect(page.getByText('Unsaved changes').first()).toBeVisible()
 })
+
+test('PDF Studio discards queued and pending inspections after removing a file or clearing all', async ({ page }) => {
+  await setupPdfMocks(page)
+  let releaseAlpha!: () => void
+  let alphaCalls = 0
+  let betaCalls = 0
+  await page.route('**/api/pdf/inspect**', async route => {
+    const body = route.request().postData() ?? ''
+    if (body.includes('beta.pdf')) {
+      betaCalls += 1
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(inspectionFor('beta.pdf', 1)) })
+      return
+    }
+    alphaCalls += 1
+    const gate = new Promise<void>(resolve => { releaseAlpha = resolve })
+    await gate
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(inspectionFor('alpha.pdf', 2)) })
+  })
+
+  await page.goto('/')
+  await switchMode(page, 'PDF Studio')
+
+  await page.locator('input[aria-label="Upload PDF files"]').setInputFiles([
+    { name: 'alpha.pdf', mimeType: 'application/pdf', buffer: PDF_BYTES },
+    { name: 'beta.pdf', mimeType: 'application/pdf', buffer: PDF_BYTES },
+  ])
+  await expect.poll(() => alphaCalls).toBe(1)
+  await expect(page.getByRole('heading', { name: 'Loaded PDFs (2)', exact: true })).toBeVisible()
+
+  // Remove queued beta.pdf while alpha.pdf inspection is still pending.
+  await page.getByRole('button', { name: 'Remove beta.pdf', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Loaded PDFs (1)', exact: true })).toBeVisible()
+
+  releaseAlpha()
+  const pageCards = page.getByRole('list', { name: 'PDF pages' }).getByRole('listitem')
+  await expect(pageCards).toHaveCount(2)
+  expect(betaCalls).toBe(0)
+
+  // Now upload a fresh pair and Clear all while alpha inspection is in flight.
+  await page.locator('input[aria-label="Upload PDF files"]').setInputFiles([
+    { name: 'alpha.pdf', mimeType: 'application/pdf', buffer: PDF_BYTES },
+    { name: 'beta.pdf', mimeType: 'application/pdf', buffer: PDF_BYTES },
+  ])
+  await expect.poll(() => alphaCalls).toBe(2)
+  await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+  releaseAlpha()
+  await expect(page.getByRole('list', { name: 'PDF pages' })).toHaveCount(0)
+  expect(betaCalls).toBe(0)
+})

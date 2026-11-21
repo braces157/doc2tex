@@ -108,6 +108,7 @@ class CompareAndCleanTest {
                       <Default Extension="png" ContentType="image/png"/>
                       <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
                       <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+                      <Override PartName="/word/review%20notes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
                       <Override PartName="/word/glossary/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.glossary+xml"/>
                       <Override PartName="/word/glossary/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
                       <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
@@ -143,6 +144,7 @@ class CompareAndCleanTest {
                     <?xml version="1.0" encoding="UTF-8"?>
                     <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
                       <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>
+                      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="review%20notes.xml"/>
                       <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.org/blog/comments" TargetMode="External"/>
                     </Relationships>
                     """);
@@ -150,6 +152,12 @@ class CompareAndCleanTest {
                     <?xml version="1.0" encoding="UTF-8"?>
                     <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
                       <w:comment w:id="1" w:author="Reviewer"><w:p><w:r><w:t>Needs work</w:t></w:r></w:p></w:comment>
+                    </w:comments>
+                    """);
+            writeEntry(zip, "word/review%20notes.xml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:comment w:id="3" w:author="PercentEncodedAuthor"><w:p><w:r><w:t>Encoded secret note</w:t></w:r></w:p></w:comment>
                     </w:comments>
                     """);
             writeEntry(zip, "word/glossary/_rels/document.xml.rels", """
@@ -263,6 +271,46 @@ class CompareAndCleanTest {
                         .retrieve()
                         .toBodilessEntity());
         assertEquals(HttpStatus.BAD_REQUEST, badDocxErr.getStatusCode());
+
+        // Large raw crop box with /UserUnit < 1 must still be bounded by raw crop-box pixels before allocation.
+        byte[] smallUnitLargeBox;
+        byte[] hugeBoxRejected;
+        try (PDDocument d1 = new PDDocument(); ByteArrayOutputStream o1 = new ByteArrayOutputStream()) {
+            PDPage p = new PDPage(new PDRectangle(20_000f, 20_000f));
+            p.setUserUnit(0.05f);
+            d1.addPage(p);
+            d1.save(o1);
+            smallUnitLargeBox = o1.toByteArray();
+        }
+        try (PDDocument d2 = new PDDocument(); ByteArrayOutputStream o2 = new ByteArrayOutputStream()) {
+            PDPage p = new PDPage(new PDRectangle(400_000f, 400_000f));
+            p.setUserUnit(0.05f);
+            d2.addPage(p);
+            d2.save(o2);
+            hugeBoxRejected = o2.toByteArray();
+        }
+        var boundedParts = new LinkedMultiValueMap<String, Object>();
+        boundedParts.add("left", part("large-unit.pdf", smallUnitLargeBox));
+        boundedParts.add("right", part("large-unit2.pdf", smallUnitLargeBox));
+        PdfDiffService.VisualPageDiff boundedVisual = client().post().uri("/api/diff/pdf/page?page=1")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(boundedParts)
+                .retrieve()
+                .body(PdfDiffService.VisualPageDiff.class);
+        assertNotNull(boundedVisual);
+        assertTrue(boundedVisual.width() <= 1800 && boundedVisual.height() <= 1800,
+                "Raw crop box with UserUnit<1 must stay bounded <= 1800px, got " + boundedVisual.width() + "x" + boundedVisual.height());
+
+        var hugeParts = new LinkedMultiValueMap<String, Object>();
+        hugeParts.add("left", part("huge.pdf", hugeBoxRejected));
+        hugeParts.add("right", part("huge2.pdf", hugeBoxRejected));
+        var hugeErr = assertThrows(org.springframework.web.client.HttpClientErrorException.class, () ->
+                client().post().uri("/api/diff/pdf/page?page=1")
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(hugeParts)
+                        .retrieve()
+                        .toBodilessEntity());
+        assertEquals(HttpStatus.BAD_REQUEST, hugeErr.getStatusCode());
     }
 
     @Test
@@ -278,7 +326,7 @@ class CompareAndCleanTest {
                 .body(DocxCleanerService.DocxInspection.class);
         assertNotNull(inspection);
         assertEquals(1, inspection.mediaCount());
-        assertEquals(1, inspection.commentCount());
+        assertEquals(3, inspection.commentCount());
         assertEquals(1, inspection.externalLinkCount());
         assertEquals("Grace Hopper", inspection.metadata().get("creator"));
 
@@ -317,11 +365,14 @@ class CompareAndCleanTest {
             assertFalse(glossaryDocXml.contains("commentReference"), glossaryDocXml);
             String contentTypesXml = new String(zip.getInputStream(zip.getEntry("[Content_Types].xml")).readAllBytes(), StandardCharsets.UTF_8);
             assertFalse(contentTypesXml.contains("glossary/comments.xml"), contentTypesXml);
+            assertFalse(contentTypesXml.contains("review%20notes.xml"), contentTypesXml);
             String relsXml = new String(zip.getInputStream(zip.getEntry("word/_rels/document.xml.rels")).readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(relsXml.contains("https://example.org/blog/comments"), "External hyperlink containing 'comments' must be preserved");
             assertFalse(relsXml.contains("Target=\"comments.xml\""), relsXml);
+            assertFalse(relsXml.contains("review%20notes.xml"), relsXml);
         }
         assertFalse(names.contains("word/comments.xml"));
+        assertFalse(names.contains("word/review%20notes.xml"));
         assertFalse(names.contains("word/glossary/comments.xml"));
         assertFalse(names.contains("docProps/custom.xml"));
     }

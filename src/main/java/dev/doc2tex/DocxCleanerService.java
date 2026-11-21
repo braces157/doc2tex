@@ -8,6 +8,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -100,6 +102,7 @@ class DocxCleanerService {
             int externalLinks = 0;
 
             try (ZipFile zip = new ZipFile(input.toFile())) {
+                Set<String> commentParts = discoverCommentParts(zip).commentParts();
                 var entries = zip.entries();
                 while (entries.hasMoreElements()) {
                     ZipEntry entry = entries.nextElement();
@@ -113,7 +116,7 @@ class DocxCleanerService {
                         readXmlMetadata(readEntryBounded(zip, entry, MAX_XML_BYTES), metadata);
                     } else if (name.equals("docProps/app.xml")) {
                         readXmlMetadata(readEntryBounded(zip, entry, MAX_XML_BYTES), metadata);
-                    } else if (name.matches("word/comments.*\\.xml")) {
+                    } else if (commentParts.contains(normalizePartPath(name))) {
                         comments += countTags(readEntryBounded(zip, entry, MAX_XML_BYTES), Set.of("comment"));
                     } else if (name.equals("word/document.xml")) {
                         tracked += countTags(readEntryBounded(zip, entry, MAX_XML_BYTES), Set.of("ins", "del"));
@@ -389,7 +392,18 @@ class DocxCleanerService {
         if (path == null) return "";
         String cleaned = path.replace('\\', '/');
         while (cleaned.startsWith("/")) cleaned = cleaned.substring(1);
-        return cleaned.toLowerCase(Locale.ROOT);
+        // Compare OPC part names consistently whether ZIP item names or .rels targets are percent-encoded.
+        String decoded = decodePercentPath(cleaned);
+        return decoded.toLowerCase(Locale.ROOT);
+    }
+
+    private static String decodePercentPath(String path) {
+        if (path.indexOf('%') < 0) return path;
+        try {
+            return URLDecoder.decode(path.replace("+", "%2B"), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ignored) {
+            return path;
+        }
     }
 
     private static String baseDirForRels(String relsName) {
@@ -420,8 +434,8 @@ class DocxCleanerService {
         try {
             URI base = URI.create("opc://pkg/" + baseDir);
             URI resolved = base.resolve(cleanTarget).normalize();
-            String path = resolved.getPath();
-            return path == null ? "" : normalizePartPath(path);
+            String rawPath = resolved.getRawPath();
+            return rawPath == null ? "" : normalizePartPath(rawPath);
         } catch (IllegalArgumentException ignored) {
             return normalizePartPath(baseDir + cleanTarget);
         }

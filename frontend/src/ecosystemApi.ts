@@ -210,7 +210,7 @@ export async function downloadPdfToSource(
   targetFormat: 'markdown' | 'latex-zip' | 'docx',
   aiLayout: boolean,
   password?: string,
-): Promise<BinaryDownload> {
+): Promise<BinaryDownload & { warnings: string }> {
   const body = new FormData()
   body.append('file', file)
   body.append('targetFormat', targetFormat)
@@ -221,6 +221,7 @@ export async function downloadPdfToSource(
   return {
     blob: await res.blob(),
     filename: filenameFromDisposition(res.headers.get('content-disposition'), 'converted'),
+    warnings: res.headers.get('x-doc2tex-warnings') || '',
   }
 }
 
