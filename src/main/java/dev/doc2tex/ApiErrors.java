@@ -26,7 +26,7 @@ class ApiErrors {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<?> tooLarge() {
-        return ResponseEntity.status(413).body(Map.of("message", "Choose a DOCX file smaller than 20 MB."));
+        return ResponseEntity.status(413).body(Map.of("message", "The upload exceeds the size limit (20 MB per file, 50 MB total)."));
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, MethodArgumentTypeMismatchException.class,

@@ -457,4 +457,52 @@ class HostedDemoModeTest {
         assertThrows(java.io.IOException.class, () -> SourceVersionStore.checkPreviewSize(bigPreview, 1024));
         assertFalse(Files.exists(bigPreview));
     }
+
+    @Test
+    void pdfStudioRoutesAreRateLimitedInDemoMode() {
+        String session = mintSession();
+        var invalidPdf = new LinkedMultiValueMap<String, Object>();
+        invalidPdf.add("file", new ByteArrayResource("not-a-pdf".getBytes()) {
+            @Override public String getFilename() { return "bad.pdf"; }
+        });
+        for (int i = 0; i < 2; i++) {
+            var attempt = request(HttpMethod.POST, "/api/pdf/inspect",
+                    Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                            "CF-Connecting-IP", "198.51.100.77"), invalidPdf);
+            assertEquals(HttpStatus.BAD_REQUEST, attempt.getStatusCode());
+        }
+        var blocked = request(HttpMethod.POST, "/api/pdf/inspect",
+                Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                        "CF-Connecting-IP", "198.51.100.77"), invalidPdf);
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, blocked.getStatusCode());
+        assertNotNull(blocked.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+
+        var convertBody = new LinkedMultiValueMap<String, Object>();
+        convertBody.add("file", new ByteArrayResource("bad".getBytes()) {
+            @Override public String getFilename() { return "bad.exe"; }
+        });
+        convertBody.add("targetFormat", "markdown");
+        for (int i = 0; i < 2; i++) {
+            var attempt = request(HttpMethod.POST, "/api/convert",
+                    Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                            "CF-Connecting-IP", "198.51.100.88"), convertBody);
+            assertEquals(HttpStatus.BAD_REQUEST, attempt.getStatusCode());
+        }
+        var convertBlocked = request(HttpMethod.POST, "/api/convert",
+                Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                        "CF-Connecting-IP", "198.51.100.88"), convertBody);
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, convertBlocked.getStatusCode());
+
+        for (int i = 0; i < 2; i++) {
+            var attempt = request(HttpMethod.GET, "/api/jobs/nonexistent-id/export/markdown",
+                    Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                            "CF-Connecting-IP", "198.51.100.99"), null);
+            assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, attempt.getStatusCode());
+        }
+        var exportBlocked = request(HttpMethod.GET, "/api/jobs/nonexistent-id/export/markdown",
+                Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                        "CF-Connecting-IP", "198.51.100.99"), null);
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exportBlocked.getStatusCode());
+        assertNotNull(exportBlocked.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+    }
 }

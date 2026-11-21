@@ -78,12 +78,30 @@ class DemoGuardFilter extends OncePerRequestFilter {
                 return;
             }
 
-            if ("POST".equalsIgnoreCase(request.getMethod())) {
+            if ("GET".equalsIgnoreCase(request.getMethod())
+                    && path.matches("^/api/jobs/[^/]+/export/[^/]+$")) {
+                if (!checkRateLimit(previews, clientIp(request), response,
+                        "Demo export rate limit reached. Please wait a few minutes before exporting again.")) {
+                    return;
+                }
+            } else if ("POST".equalsIgnoreCase(request.getMethod())) {
                 if (path.equals("/api/jobs") || path.matches("^/api/jobs/[^/]+/layout-copy$")) {
                     if (!checkUploadAccess(request, response, sessionId)) return;
                 } else if (path.matches("^/api/jobs/[^/]+/preview$")) {
                     if (!checkRateLimit(previews, clientIp(request), response,
                             "Demo PDF build rate limit reached. Please wait a few minutes before building again.")) {
+                        return;
+                    }
+                } else if (path.startsWith("/api/pdf/")
+                        || path.equals("/api/convert")
+                        || path.startsWith("/api/convert/")
+                        || path.startsWith("/api/diff/")
+                        || path.startsWith("/api/docx/")
+                        || path.startsWith("/api/templates/")
+                        || path.startsWith("/api/references/")
+                        || path.startsWith("/api/batch/")) {
+                    if (!checkRateLimit(uploads, clientIp(request), response,
+                            "Demo workspace rate limit reached. Please wait a few minutes before trying again.")) {
                         return;
                     }
                 }
