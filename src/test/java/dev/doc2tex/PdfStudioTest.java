@@ -397,13 +397,128 @@ class PdfStudioTest {
         var badWatermarkParts = new LinkedMultiValueMap<String, Object>();
         badWatermarkParts.add("files", pdfPart("one.pdf", valid));
         badWatermarkParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
-                List.of(new PageSpec(0, 1, 45)), false, false, "BAD\u0007TEXT", 0.2, false, "bad.pdf")));
-        var badRotation = assertThrows(HttpClientErrorException.class, () ->
+                List.of(new PageSpec(0, 1, 0)), false, false, "BAD\u0007TEXT", 0.2, false, "bad.pdf")));
+        var badWatermark = assertThrows(HttpClientErrorException.class, () ->
                 client().post().uri("/api/pdf/assemble")
                         .contentType(MediaType.MULTIPART_FORM_DATA)
                         .body(badWatermarkParts)
                         .retrieve()
                         .toBodilessEntity());
+        assertEquals(HttpStatus.BAD_REQUEST, badWatermark.getStatusCode());
+        assertTrue(badWatermark.getResponseBodyAsString().toLowerCase().contains("watermark"), badWatermark.getResponseBodyAsString());
+
+        var badRotationParts = new LinkedMultiValueMap<String, Object>();
+        badRotationParts.add("files", pdfPart("one.pdf", valid));
+        badRotationParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
+                List.of(new PageSpec(0, 1, 45)), false, false, "", 0.2, false, "bad.pdf")));
+        var badRotation = assertThrows(HttpClientErrorException.class, () ->
+                client().post().uri("/api/pdf/assemble")
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(badRotationParts)
+                        .retrieve()
+                        .toBodilessEntity());
         assertEquals(HttpStatus.BAD_REQUEST, badRotation.getStatusCode());
+        assertTrue(badRotation.getResponseBodyAsString().toLowerCase().contains("rotation"), badRotation.getResponseBodyAsString());
+    }
+
+    @Test
+    void extractorProcessesAll500PagesAndPage2ImagesWhenPdfExceedsPageCap() throws Exception {
+        try (PDDocument doc = new PDDocument()) {
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            BufferedImage img = new BufferedImage(12, 12, BufferedImage.TYPE_INT_RGB);
+            PDImageXObject ximg = LosslessFactory.createFromImage(doc, img);
+            for (int p = 1; p <= 501; p++) {
+                PDPage page = new PDPage(PDRectangle.LETTER);
+                doc.addPage(page);
+                if (p == 1 || p == 2 || p == 500 || p == 501) {
+                    try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                        cs.beginText();
+                        cs.setFont(font, 11);
+                        cs.newLineAtOffset(72, 700);
+                        cs.showText("Marker page " + p);
+                        cs.endText();
+                        if (p == 2) cs.drawImage(ximg, 72, 600, 12, 12);
+                    }
+                }
+            }
+            TextExtract text = PdfStudioExtractor.extractText(doc, "long.pdf");
+            assertEquals(501, text.pageCount());
+            assertTrue(text.truncated());
+            assertEquals(500, text.pages().size(), "Must process all 500 capped pages, not stop after page 1");
+            assertTrue(text.pages().get(499).text().contains("Marker page 500"));
+
+            BinaryResult zip = PdfStudioExtractor.extractImagesZip(doc, "long.pdf");
+            Map<String, byte[]> entries = new LinkedHashMap<>();
+            try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zip.bytes()))) {
+                ZipEntry e;
+                while ((e = zis.getNextEntry()) != null) entries.put(e.getName(), zis.readAllBytes());
+            }
+            assertTrue(entries.containsKey("page-002-img-01.png"), "Image on page 2 must still be extracted");
+            String manifest = new String(entries.get("manifest.json"), StandardCharsets.UTF_8);
+            assertTrue(manifest.contains("\"truncated\" : true") || manifest.contains("\"truncated\":true"), manifest);
+        }
+    }
+
+    @Test
+    void assemblePreservesInheritedResourcesAndScrubsPageMetadataOnlyWhenEnabled() throws Exception {
+        byte[] sourcePdf;
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage(PDRectangle.LETTER);
+            doc.addPage(page);
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(font, 12);
+                cs.newLineAtOffset(72, 700);
+                cs.showText("Inherited Font Resource Proof");
+                cs.endText();
+            }
+            // Move /Resources from leaf page to its parent /Pages tree node to test inheritance.
+            var leafRes = page.getCOSObject().getDictionaryObject(COSName.RESOURCES);
+            var parentPages = page.getCOSObject().getCOSDictionary(COSName.PARENT);
+            parentPages.setItem(COSName.RESOURCES, leafRes);
+            page.getCOSObject().removeItem(COSName.RESOURCES);
+
+            // Attach page-level XMP metadata.
+            PDMetadata pageMeta = new PDMetadata(doc);
+            pageMeta.importXMPMetadata("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">AuthorSecretXmp</x:xmpmeta>"
+                    .getBytes(StandardCharsets.UTF_8));
+            page.setMetadata(pageMeta);
+
+            doc.save(out);
+            sourcePdf = out.toByteArray();
+        }
+
+        // 1. Scrub enabled: text via inherited resources survives, page-level XMP is stripped.
+        var scrubbedParts = new LinkedMultiValueMap<String, Object>();
+        scrubbedParts.add("files", pdfPart("inherited.pdf", sourcePdf));
+        scrubbedParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
+                List.of(new PageSpec(0, 1, 0)), true, false, "", 0.2, false, "scrubbed.pdf")));
+        byte[] scrubbedBytes = client().post().uri("/api/pdf/assemble")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(scrubbedParts)
+                .retrieve()
+                .body(byte[].class);
+        assertNotNull(scrubbedBytes);
+        try (PDDocument outDoc = Loader.loadPDF(scrubbedBytes)) {
+            String extracted = new PDFTextStripper().getText(outDoc);
+            assertTrue(extracted.contains("Inherited Font Resource Proof"), extracted);
+            assertNull(outDoc.getPage(0).getMetadata(), "Page-level XMP metadata must be scrubbed when enabled");
+        }
+
+        // 2. Scrub disabled: page-level XMP is preserved.
+        var keepParts = new LinkedMultiValueMap<String, Object>();
+        keepParts.add("files", pdfPart("inherited.pdf", sourcePdf));
+        keepParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
+                List.of(new PageSpec(0, 1, 0)), false, false, "", 0.2, false, "kept.pdf")));
+        byte[] keptBytes = client().post().uri("/api/pdf/assemble")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(keepParts)
+                .retrieve()
+                .body(byte[].class);
+        assertNotNull(keptBytes);
+        try (PDDocument outDoc = Loader.loadPDF(keptBytes)) {
+            assertNotNull(outDoc.getPage(0).getMetadata(), "Page-level XMP metadata must remain when scrubMetadata=false");
+        }
     }
 }

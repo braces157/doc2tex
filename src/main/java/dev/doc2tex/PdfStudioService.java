@@ -16,8 +16,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSObjectKey;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
@@ -172,16 +175,32 @@ class PdfStudioService {
                 sources.add(loadPdf(fileBytes.get(i), pw));
             }
             try (PDDocument target = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                Set<COSBase> scrubbed = Collections.newSetFromMap(new IdentityHashMap<>());
                 for (PageSpec spec : plan.pages()) {
                     PDDocument source = sources.get(spec.fileIndex());
                     if (spec.pageNumber() < 1 || spec.pageNumber() > source.getNumberOfPages()) {
                         throw bad("Page " + spec.pageNumber() + " does not exist in source PDF #" + (spec.fileIndex() + 1) + ".");
                     }
-                    PDPage imported = target.importPage(source.getPage(spec.pageNumber() - 1));
+                    PDPage sourcePage = source.getPage(spec.pageNumber() - 1);
+                    PDPage imported = target.importPage(sourcePage);
+                    // PDFBox importPage copies the page dictionary shallowly without inherited /Resources or boxes.
+                    if (!imported.getCOSObject().containsKey(COSName.RESOURCES) && sourcePage.getResources() != null) {
+                        imported.setResources(sourcePage.getResources());
+                    }
+                    if (!imported.getCOSObject().containsKey(COSName.MEDIA_BOX) && sourcePage.getMediaBox() != null) {
+                        imported.setMediaBox(sourcePage.getMediaBox());
+                    }
+                    if (!imported.getCOSObject().containsKey(COSName.CROP_BOX)
+                            && sourcePage.getCropBox() != null) {
+                        imported.setCropBox(sourcePage.getCropBox());
+                    }
                     if (spec.rotation() != 0) {
                         imported.setRotation(Math.floorMod(imported.getRotation() + spec.rotation(), 360));
                     }
                     if (plan.stripAnnotations()) imported.setAnnotations(List.of());
+                    if (plan.scrubMetadata()) {
+                        scrubPageAndResourceMetadata(imported, scrubbed);
+                    }
                 }
 
                 if (plan.scrubMetadata()) {
@@ -228,6 +247,34 @@ class PdfStudioService {
         String filename = sanitizeDisplayFilename(file.getOriginalFilename(), "document.pdf");
         try (PDDocument doc = loadPdf(bytes, password)) {
             return PdfStudioExtractor.extractImagesZip(doc, filename);
+        }
+    }
+
+    private static void scrubPageAndResourceMetadata(PDPage page, Set<COSBase> visited) {
+        page.setMetadata(null);
+        page.getCOSObject().removeItem(COSName.PIECE_INFO);
+        COSBase resources = page.getCOSObject().getDictionaryObject(COSName.RESOURCES);
+        scrubMetadataTree(resources, visited, 0);
+    }
+
+    private static void scrubMetadataTree(COSBase node, Set<COSBase> visited, int depth) {
+        if (node == null || depth > 8) return;
+        if (node instanceof COSObject obj) {
+            node = obj.getObject();
+            if (node == null) return;
+        }
+        if (!visited.add(node)) return;
+        if (node instanceof COSDictionary dict) {
+            dict.removeItem(COSName.METADATA);
+            dict.removeItem(COSName.PIECE_INFO);
+            for (COSName key : List.copyOf(dict.keySet())) {
+                if (COSName.PARENT.equals(key)) continue;
+                scrubMetadataTree(dict.getDictionaryObject(key), visited, depth + 1);
+            }
+        } else if (node instanceof COSArray arr) {
+            for (int i = 0; i < arr.size(); i++) {
+                scrubMetadataTree(arr.getObject(i), visited, depth + 1);
+            }
         }
     }
 

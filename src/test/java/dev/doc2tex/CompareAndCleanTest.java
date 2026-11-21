@@ -108,6 +108,8 @@ class CompareAndCleanTest {
                       <Default Extension="png" ContentType="image/png"/>
                       <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
                       <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+                      <Override PartName="/word/glossary/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.glossary+xml"/>
+                      <Override PartName="/word/glossary/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
                       <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
                       <Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>
                     </Types>
@@ -148,6 +150,24 @@ class CompareAndCleanTest {
                     <?xml version="1.0" encoding="UTF-8"?>
                     <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
                       <w:comment w:id="1" w:author="Reviewer"><w:p><w:r><w:t>Needs work</w:t></w:r></w:p></w:comment>
+                    </w:comments>
+                    """);
+            writeEntry(zip, "word/glossary/_rels/document.xml.rels", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>
+                    </Relationships>
+                    """);
+            writeEntry(zip, "word/glossary/document.xml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <w:glossaryDocument xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:docParts><w:docPart><w:docPartBody><w:p><w:r><w:commentReference w:id="2"/></w:r></w:p></w:docPartBody></w:docPart></w:docParts>
+                    </w:glossaryDocument>
+                    """);
+            writeEntry(zip, "word/glossary/comments.xml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:comment w:id="2" w:author="GlossaryReviewer"><w:p><w:r><w:t>Hidden glossary note</w:t></w:r></w:p></w:comment>
                     </w:comments>
                     """);
             writeEntry(zip, "word/document.xml", """
@@ -213,6 +233,36 @@ class CompareAndCleanTest {
                 .body(PdfDiffService.VisualPageDiff.class);
         assertNotNull(page2);
         assertTrue(page2.pixelDiffRatio() > 0.0);
+
+        // Failure-path coverage: page=0, malformed PDF, malformed DOCX.
+        var badPageErr = assertThrows(org.springframework.web.client.HttpClientErrorException.class, () ->
+                client().post().uri("/api/diff/pdf/page?page=0")
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(parts)
+                        .retrieve()
+                        .toBodilessEntity());
+        assertEquals(HttpStatus.BAD_REQUEST, badPageErr.getStatusCode());
+
+        var badPdfParts = new LinkedMultiValueMap<String, Object>();
+        badPdfParts.add("left", part("bad.pdf", "not-a-pdf".getBytes(StandardCharsets.UTF_8)));
+        badPdfParts.add("right", part("v2.pdf", right));
+        var badPdfErr = assertThrows(org.springframework.web.client.HttpClientErrorException.class, () ->
+                client().post().uri("/api/diff/pdf")
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(badPdfParts)
+                        .retrieve()
+                        .toBodilessEntity());
+        assertEquals(HttpStatus.BAD_REQUEST, badPdfErr.getStatusCode());
+
+        var badDocxParts = new LinkedMultiValueMap<String, Object>();
+        badDocxParts.add("file", part("corrupt.docx", "not-a-zip".getBytes(StandardCharsets.UTF_8)));
+        var badDocxErr = assertThrows(org.springframework.web.client.HttpClientErrorException.class, () ->
+                client().post().uri("/api/docx/inspect")
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(badDocxParts)
+                        .retrieve()
+                        .toBodilessEntity());
+        assertEquals(HttpStatus.BAD_REQUEST, badDocxErr.getStatusCode());
     }
 
     @Test
@@ -262,11 +312,17 @@ class CompareAndCleanTest {
             assertFalse(coreXml.contains("dcterms:modified"), coreXml);
             String docXml = new String(zip.getInputStream(zip.getEntry("word/document.xml")).readAllBytes(), StandardCharsets.UTF_8);
             assertFalse(docXml.contains("commentReference"));
+            assertTrue(docXml.contains("Hello clean document."), docXml);
+            String glossaryDocXml = new String(zip.getInputStream(zip.getEntry("word/glossary/document.xml")).readAllBytes(), StandardCharsets.UTF_8);
+            assertFalse(glossaryDocXml.contains("commentReference"), glossaryDocXml);
+            String contentTypesXml = new String(zip.getInputStream(zip.getEntry("[Content_Types].xml")).readAllBytes(), StandardCharsets.UTF_8);
+            assertFalse(contentTypesXml.contains("glossary/comments.xml"), contentTypesXml);
             String relsXml = new String(zip.getInputStream(zip.getEntry("word/_rels/document.xml.rels")).readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(relsXml.contains("https://example.org/blog/comments"), "External hyperlink containing 'comments' must be preserved");
             assertFalse(relsXml.contains("Target=\"comments.xml\""), relsXml);
         }
         assertFalse(names.contains("word/comments.xml"));
+        assertFalse(names.contains("word/glossary/comments.xml"));
         assertFalse(names.contains("docProps/custom.xml"));
     }
 }

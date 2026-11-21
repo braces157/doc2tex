@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -84,7 +86,9 @@ class MultiFormatService {
     private final JobStore store;
     private final AiLayoutSettings aiSettings;
     private final SourcePageRenderer renderer;
+    private final BooleanSupplier legacyDocReadyCheck;
 
+    @Autowired
     MultiFormatService(
             Tools tools,
             ToolRunner runner,
@@ -92,19 +96,33 @@ class MultiFormatService {
             AppProperties properties,
             JobStore store,
             AiLayoutSettings aiSettings) {
+        this(tools, runner, validator, properties, store, aiSettings, new SourcePageRenderer(runner),
+                () -> SourcePageRenderer.inspect(aiSettings.rendererExecutable(), aiSettings.dockerImage())
+                        .state().equals("ready"));
+    }
+
+    MultiFormatService(
+            Tools tools,
+            ToolRunner runner,
+            DocxValidator validator,
+            AppProperties properties,
+            JobStore store,
+            AiLayoutSettings aiSettings,
+            SourcePageRenderer renderer,
+            BooleanSupplier legacyDocReadyCheck) {
         this.tools = tools;
         this.runner = runner;
         this.validator = validator;
         this.properties = properties;
         this.store = store;
         this.aiSettings = aiSettings;
-        this.renderer = new SourcePageRenderer(runner);
+        this.renderer = renderer;
+        this.legacyDocReadyCheck = legacyDocReadyCheck;
     }
 
     FormatCatalog formats() {
         boolean pandocReady = tools.available(tools.pandoc());
-        boolean legacyDocReady = SourcePageRenderer.inspect(aiSettings.rendererExecutable(), aiSettings.dockerImage())
-                .state().equals("ready");
+        boolean legacyDocReady = legacyDocReadyCheck.getAsBoolean();
         List<FormatOption> outputs = OUTPUT_SPECS.stream()
                 .map(spec -> new FormatOption(spec.id(), spec.label(), spec.extension()))
                 .toList();
@@ -120,7 +138,10 @@ class MultiFormatService {
         }
         OutputSpec outputSpec = findOutputSpec(targetFormat);
         String originalName = PdfStudioService.sanitizeDisplayFilename(file.getOriginalFilename(), "document");
-        String ext = extensionOf(originalName);
+        String rawName = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
+        int slash = Math.max(rawName.lastIndexOf('/'), rawName.lastIndexOf('\\'));
+        String ext = extensionOf(slash >= 0 ? rawName.substring(slash + 1) : rawName);
+        if (ext.isEmpty()) ext = extensionOf(originalName);
         boolean legacyDoc = ext.equals(".doc");
         String pandocInput = INPUT_FORMATS.get(ext);
         if (!legacyDoc && pandocInput == null) {
@@ -140,8 +161,7 @@ class MultiFormatService {
             if (ext.equals(".docx")) {
                 validator.validate(inputFile);
             } else if (legacyDoc) {
-                var rendererStatus = SourcePageRenderer.inspect(aiSettings.rendererExecutable(), aiSettings.dockerImage());
-                if (!rendererStatus.state().equals("ready")) {
+                if (!legacyDocReadyCheck.getAsBoolean()) {
                     throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                             "Converting legacy .doc files requires LibreOffice. Run setup-ai-layout or convert to .docx first.");
                 }
@@ -237,6 +257,7 @@ class MultiFormatService {
             }
             Path outFile = tempDir.resolve("export" + outputSpec.extension());
             ToolRunner.Result result;
+            List<String> extraWarnings = new ArrayList<>();
             if (copiedMedia && EMBED_MEDIA_TARGETS.contains(outputSpec.id())) {
                 // Keep Pandoc --sandbox enforced on both passes while inlining only validated job media as data URIs.
                 Path astFile = tempDir.resolve("ast.json");
@@ -254,10 +275,16 @@ class MultiFormatService {
                     throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT,
                             "Could not export LaTeX source to " + outputSpec.id() + ". Check for unsupported custom macros.");
                 }
-                inlineLocalMediaInPandocAst(astFile, tempDir, localMediaDir);
+                int skippedMedia = inlineLocalMediaInPandocAst(astFile, tempDir, localMediaDir);
+                if (skippedMedia > 0) {
+                    extraWarnings.add(skippedMedia + " image reference(s) could not be embedded (unsupported format, missing path, or 30 MB media limit).");
+                }
                 List<String> fromJsonCmd = buildCommand("json", outputSpec, astFile, outFile, false, false);
                 result = runPandoc(fromJsonCmd, tempDir, tempDir.resolve("export.log"));
             } else {
+                if (copiedMedia) {
+                    extraWarnings.add("Single-file " + outputSpec.id() + " export does not bundle extracted media/ images; export DOCX/HTML/EPUB/PPTX or keep the ZIP media/ folder alongside this file.");
+                }
                 List<String> command = buildCommand("latex", outputSpec, texFile, outFile, false, hasBib);
                 result = runPandoc(command, tempDir, tempDir.resolve("export.log"));
             }
@@ -273,7 +300,10 @@ class MultiFormatService {
                     baseName + outputSpec.extension(),
                     "export" + outputSpec.extension(),
                     outputSpec.extension());
-            return new ConvertedFile(downloadName, outputSpec.mediaType(), outBytes, outputSpec.textPreviewable(), cleanWarnings(result.log()));
+            String pandocWarn = cleanWarnings(result.log());
+            if (!pandocWarn.isEmpty()) extraWarnings.add(pandocWarn);
+            String combinedWarnings = cleanWarnings(String.join(" | ", extraWarnings));
+            return new ConvertedFile(downloadName, outputSpec.mediaType(), outBytes, outputSpec.textPreviewable(), combinedWarnings);
         } finally {
             SourceVersionStore.removeTreeQuietly(tempDir);
         }
@@ -334,17 +364,20 @@ class MultiFormatService {
         return copiedAny;
     }
 
-    private static void inlineLocalMediaInPandocAst(Path astFile, Path tempDir, Path mediaDir) throws IOException {
+    private static int inlineLocalMediaInPandocAst(Path astFile, Path tempDir, Path mediaDir) throws IOException {
         JsonNode root = JSON.readTree(Files.readAllBytes(astFile));
         long[] budget = {0L};
+        int[] skipped = {0};
         Path canonicalMedia = mediaDir.toAbsolutePath().normalize();
         Path canonicalTemp = tempDir.toAbsolutePath().normalize();
-        if (rewriteImageNodes(root, canonicalTemp, canonicalMedia, budget)) {
+        if (rewriteImageNodes(root, canonicalTemp, canonicalMedia, budget, skipped)) {
             Files.write(astFile, JSON.writeValueAsBytes(root));
         }
+        return skipped[0];
     }
 
-    private static boolean rewriteImageNodes(JsonNode node, Path tempDir, Path mediaDir, long[] budget) throws IOException {
+    private static boolean rewriteImageNodes(
+            JsonNode node, Path tempDir, Path mediaDir, long[] budget, int[] skipped) throws IOException {
         boolean changed = false;
         if (node instanceof ObjectNode obj) {
             JsonNode type = obj.get("t");
@@ -357,15 +390,17 @@ class MultiFormatService {
                     if (dataUri != null) {
                         targetArr.set(0, dataUri);
                         changed = true;
+                    } else if (src != null && !src.isBlank() && !src.startsWith("data:") && !src.contains("://")) {
+                        skipped[0]++;
                     }
                 }
             }
             for (var entry : obj.properties()) {
-                if (rewriteImageNodes(entry.getValue(), tempDir, mediaDir, budget)) changed = true;
+                if (rewriteImageNodes(entry.getValue(), tempDir, mediaDir, budget, skipped)) changed = true;
             }
         } else if (node instanceof ArrayNode arr) {
             for (JsonNode child : arr) {
-                if (rewriteImageNodes(child, tempDir, mediaDir, budget)) changed = true;
+                if (rewriteImageNodes(child, tempDir, mediaDir, budget, skipped)) changed = true;
             }
         }
         return changed;

@@ -90,6 +90,8 @@ class EcosystemToolsTest {
         String raw = """
                 References
                 See https://doi.org/10.1145/3544548.3580999 for the ACM study (2023).
+                Balanced suffix (10.1234/example(2026)).
+                Legacy SICI DOI 10.1002/(SICI)1521-3951(199911)216:1<135::AID-PSSB135>3.0.CO;2-#.
                 Preprint available at arXiv:2401.12345v2 from 2024.
                 Foundational textbook ISBN 978-0-201-13447-6 published 1984.
                 [1] Knuth, D. (1984). The TeXbook with trailing slash \\
@@ -104,11 +106,13 @@ class EcosystemToolsTest {
                 .body(ReferenceExtractorService.ExtractionReport.class);
 
         assertNotNull(report);
-        assertEquals(4, report.totalFound());
+        assertEquals(6, report.totalFound());
         assertTrue(report.bibtex().contains("10.1145/3544548.3580999"));
+        assertTrue(report.bibtex().contains("doi = {10.1234/example(2026)}"), report.bibtex());
+        assertTrue(report.bibtex().contains("doi = {10.1002/(SICI)1521-3951(199911)216:1<135::AID-PSSB135>3.0.CO;2-#}"), report.bibtex());
         assertTrue(report.bibtex().contains("2401.12345v2"));
         var parsed = BibtexLibrary.parse(report.bibtex().getBytes(StandardCharsets.UTF_8));
-        assertEquals(4, parsed.entries().size());
+        assertEquals(6, parsed.entries().size());
     }
 
     @Test
@@ -142,5 +146,9 @@ class EcosystemToolsTest {
         assertTrue(entries.containsKey("outputs/one.html"));
         assertTrue(entries.containsKey("outputs/two.html"));
         assertTrue(entries.containsKey("batch-report.json"));
+        String htmlOne = new String(entries.get("outputs/one.html"), StandardCharsets.UTF_8);
+        String htmlTwo = new String(entries.get("outputs/two.html"), StandardCharsets.UTF_8);
+        assertTrue(htmlOne.contains("Doc One") && htmlOne.contains("Body one."), htmlOne);
+        assertTrue(htmlTwo.contains("Doc Two") && htmlTwo.contains("Body two."), htmlTwo);
     }
 }

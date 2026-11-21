@@ -459,7 +459,7 @@ class HostedDemoModeTest {
     }
 
     @Test
-    void pdfStudioRoutesAreRateLimitedInDemoMode() {
+    void pdfStudioRoutesAreRateLimitedInDemoMode() throws Exception {
         String session = mintSession();
         var invalidPdf = new LinkedMultiValueMap<String, Object>();
         invalidPdf.add("file", new ByteArrayResource("not-a-pdf".getBytes()) {
@@ -493,16 +493,26 @@ class HostedDemoModeTest {
                         "CF-Connecting-IP", "198.51.100.88"), convertBody);
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, convertBlocked.getStatusCode());
 
-        for (int i = 0; i < 2; i++) {
-            var attempt = request(HttpMethod.GET, "/api/jobs/nonexistent-id/export/markdown",
+        Job ownedJob = createOwnedJob(session, "export-rate-doc.docx");
+        try {
+            for (int i = 0; i < 2; i++) {
+                var attempt = request(HttpMethod.GET, "/api/jobs/" + ownedJob.id() + "/export/markdown",
+                        Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                                "CF-Connecting-IP", "198.51.100.99"), null);
+                assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, attempt.getStatusCode());
+            }
+            var exportBlocked = request(HttpMethod.GET, "/api/jobs/" + ownedJob.id() + "/export/markdown",
                     Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
                             "CF-Connecting-IP", "198.51.100.99"), null);
-            assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, attempt.getStatusCode());
+            assertEquals(HttpStatus.TOO_MANY_REQUESTS, exportBlocked.getStatusCode());
+            assertNotNull(exportBlocked.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+
+            var headBlocked = request(HttpMethod.HEAD, "/api/jobs/" + ownedJob.id() + "/export/markdown",
+                    Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
+                            "CF-Connecting-IP", "198.51.100.99"), null);
+            assertEquals(HttpStatus.TOO_MANY_REQUESTS, headBlocked.getStatusCode());
+        } finally {
+            if (store.exists(ownedJob.id())) store.delete(ownedJob.id());
         }
-        var exportBlocked = request(HttpMethod.GET, "/api/jobs/nonexistent-id/export/markdown",
-                Map.of(HttpHeaders.COOKIE, DemoSession.COOKIE_NAME + "=" + session,
-                        "CF-Connecting-IP", "198.51.100.99"), null);
-        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exportBlocked.getStatusCode());
-        assertNotNull(exportBlocked.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
     }
 }

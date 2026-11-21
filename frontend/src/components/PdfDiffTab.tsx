@@ -115,6 +115,11 @@ export function PdfDiffTab({ busy, onBusyChange, onError }: PdfDiffTabProps) {
 
       {report && (
         <div className="eco-stack">
+          {report.truncated && (
+            <p className="pdf-warning-banner" role="status">
+              Comparison truncated: checked {report.comparedPages} page(s) (left: {report.leftPages} pages, right: {report.rightPages} pages; max 50 pages and 400 displayed lines per page).
+            </p>
+          )}
           <div className="review-metrics">
             <div><strong>{report.comparedPages}</strong><span>Compared pages</span></div>
             <div><strong>{report.matchingPages}</strong><span>Unchanged pages</span></div>

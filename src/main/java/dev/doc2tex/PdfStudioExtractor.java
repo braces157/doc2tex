@@ -43,7 +43,8 @@ final class PdfStudioExtractor {
     static TextExtract extractText(PDDocument doc, String filename) throws IOException {
         int pageCount = doc.getNumberOfPages();
         int limit = Math.min(pageCount, PdfStudioService.MAX_OUTPUT_PAGES);
-        boolean truncated = pageCount > PdfStudioService.MAX_OUTPUT_PAGES;
+        boolean pageLimitTruncated = pageCount > PdfStudioService.MAX_OUTPUT_PAGES;
+        boolean budgetExhausted = false;
         List<PageText> pages = new ArrayList<>(limit);
         int totalChars = 0;
         PDFTextStripper stripper = new PDFTextStripper();
@@ -54,18 +55,18 @@ final class PdfStudioExtractor {
             String text = stripper.getText(doc).replace("\r\n", "\n").replace('\r', '\n').trim();
             int remaining = PdfStudioService.MAX_TEXT_CHARS - totalChars;
             if (remaining <= 0) {
-                truncated = true;
+                budgetExhausted = true;
                 break;
             }
             if (text.length() > remaining) {
                 text = text.substring(0, remaining);
-                truncated = true;
+                budgetExhausted = true;
             }
             totalChars += text.length();
             pages.add(new PageText(p, text));
-            if (truncated) break;
+            if (budgetExhausted) break;
         }
-        return new TextExtract(filename, pageCount, totalChars, truncated, pages);
+        return new TextExtract(filename, pageCount, totalChars, pageLimitTruncated || budgetExhausted, pages);
     }
 
     static MarkdownExtract extractMarkdown(PDDocument doc, String filename) throws IOException {
@@ -99,7 +100,8 @@ final class PdfStudioExtractor {
             Set<COSObjectKey> seenGlobalKeys = new LinkedHashSet<>();
             List<Map<String, Object>> manifestEntries = new ArrayList<>();
             long totalImageBytes = 0;
-            boolean truncated = pageCount > PdfStudioService.MAX_OUTPUT_PAGES;
+            boolean pageLimitTruncated = pageCount > PdfStudioService.MAX_OUTPUT_PAGES;
+            boolean budgetExhausted = false;
 
             try (ZipOutputStream zip = new ZipOutputStream(zipBytes)) {
                 for (int i = 0; i < limit; i++) {
@@ -113,7 +115,7 @@ final class PdfStudioExtractor {
                     int imgIndex = 0;
                     for (PDImageXObject image : pageImages) {
                         if (manifestEntries.size() >= PdfStudioService.MAX_IMAGES) {
-                            truncated = true;
+                            budgetExhausted = true;
                             break;
                         }
                         if ((long) image.getWidth() * image.getHeight() > MAX_IMAGE_PIXELS) continue;
@@ -128,7 +130,7 @@ final class PdfStudioExtractor {
                         if (!ImageIO.write(buffered, "png", pngOut)) continue;
                         byte[] png = pngOut.toByteArray();
                         if (totalImageBytes + png.length > PdfStudioService.MAX_ZIP_IMAGE_BYTES) {
-                            truncated = true;
+                            budgetExhausted = true;
                             break;
                         }
                         totalImageBytes += png.length;
@@ -145,7 +147,7 @@ final class PdfStudioExtractor {
                         item.put("bytes", png.length);
                         manifestEntries.add(item);
                     }
-                    if (truncated) break;
+                    if (budgetExhausted) break;
                 }
 
                 if (manifestEntries.isEmpty()) {
@@ -157,7 +159,7 @@ final class PdfStudioExtractor {
                 manifest.put("filename", filename);
                 manifest.put("pageCount", pageCount);
                 manifest.put("imageCount", manifestEntries.size());
-                manifest.put("truncated", truncated);
+                manifest.put("truncated", pageLimitTruncated || budgetExhausted);
                 manifest.put("images", manifestEntries);
                 zip.putNextEntry(new ZipEntry("manifest.json"));
                 zip.write(JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest));

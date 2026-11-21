@@ -33,7 +33,8 @@ import org.xml.sax.SAXException;
 class ReferenceExtractorService {
     private static final int MAX_TEXT_CHARS = 500_000;
     private static final int MAX_REFS = 250;
-    private static final Pattern DOI_PATTERN = Pattern.compile("\\b(10\\.\\d{4,9}/[-._;()/:A-Za-z0-9]+)");
+    private static final int MAX_PDF_PAGES = 120;
+    private static final Pattern DOI_PATTERN = Pattern.compile("\\b(10\\.\\d{4,9}/[-._;()/:<>#+A-Za-z0-9]+)");
     private static final Pattern ARXIV_PATTERN = Pattern.compile("\\barXiv:(\\d{4}\\.\\d{4,5}(?:v\\d+)?)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern ISBN_PATTERN = Pattern.compile("\\bISBN(?:-1[03])?:?\\s*([0-9][0-9Xx-]{8,15}[0-9Xx])\\b");
     private static final Pattern NUMBERED_REF = Pattern.compile("(?m)^(?:\\[(\\d{1,3})]|(\\d{1,3})\\.)\\s+(.{18,400})$");
@@ -58,17 +59,21 @@ class ReferenceExtractorService {
         }
 
         String sourceName = "pasted-text.txt";
+        List<String> warnings = new ArrayList<>();
         String text;
         if (hasFile) {
             sourceName = PdfStudioService.sanitizeDisplayFilename(file.getOriginalFilename(), "document");
-            text = readUploadedText(file, sourceName);
+            text = readUploadedText(file, sourceName, warnings);
         } else {
             if (rawText.length() > MAX_TEXT_CHARS) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "Pasted reference text exceeds the 500 KB limit.");
+                throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Pasted reference text exceeds the 500,000-character limit.");
             }
             text = rawText;
         }
-        if (text.length() > MAX_TEXT_CHARS) text = text.substring(0, MAX_TEXT_CHARS);
+        if (text.length() > MAX_TEXT_CHARS) {
+            throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Extracted document text exceeds the 500,000-character limit. Upload a shorter section or bibliography file.");
+        }
 
         Map<String, ExtractedRef> entriesByDedupe = new LinkedHashMap<>();
         Set<String> usedKeys = new LinkedHashSet<>();
@@ -130,7 +135,6 @@ class ReferenceExtractorService {
             BibtexLibrary.parse(bibtex.getBytes(StandardCharsets.UTF_8));
         }
 
-        List<String> warnings = new ArrayList<>();
         warnings.add("Offline identifier extraction scans DOIs, arXiv IDs, ISBNs, and numbered reference lines without querying remote APIs.");
         if (entries.isEmpty()) {
             warnings.add("No DOIs, arXiv IDs, ISBNs, or numbered references were detected.");
@@ -138,7 +142,7 @@ class ReferenceExtractorService {
         return new ExtractionReport(sourceName, entries.size(), entries, bibtex, warnings);
     }
 
-    private String readUploadedText(MultipartFile file, String filename) throws IOException {
+    private String readUploadedText(MultipartFile file, String filename, List<String> warnings) throws IOException {
         if (file.getSize() > 20L * 1024 * 1024) {
             throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Uploaded file must be 20 MB or smaller.");
         }
@@ -146,9 +150,23 @@ class ReferenceExtractorService {
         if (lower.endsWith(".pdf")) {
             byte[] bytes = PdfStudioService.readAndValidatePdfBytes(file);
             try (PDDocument doc = PdfStudioService.loadPdf(bytes, "")) {
+                int pageCount = doc.getNumberOfPages();
                 PDFTextStripper stripper = new PDFTextStripper();
-                stripper.setEndPage(Math.min(doc.getNumberOfPages(), 120));
-                return stripper.getText(doc);
+                if (pageCount <= MAX_PDF_PAGES) {
+                    return stripper.getText(doc);
+                }
+                // Scan both front matter and tail pages so bibliographies at the end of long theses are captured.
+                int half = MAX_PDF_PAGES / 2;
+                stripper.setStartPage(1);
+                stripper.setEndPage(half);
+                String head = stripper.getText(doc);
+                int tailStart = pageCount - half + 1;
+                stripper.setStartPage(tailStart);
+                stripper.setEndPage(pageCount);
+                String tail = stripper.getText(doc);
+                warnings.add("PDF has " + pageCount + " pages; scanned pages 1–" + half + " and " + tailStart
+                        + "–" + pageCount + " (middle pages omitted).");
+                return head + "\n" + tail;
             }
         }
         if (lower.endsWith(".docx")) {
@@ -247,7 +265,28 @@ class ReferenceExtractorService {
     }
 
     private static String stripTrailingPunctuation(String doi) {
-        return doi.replaceAll("[.,;:)>\\]]+$", "");
+        String s = doi;
+        while (!s.isEmpty()) {
+            char last = s.charAt(s.length() - 1);
+            if (last == '.' || last == ',' || last == ';' || last == ':' || last == ']') {
+                s = s.substring(0, s.length() - 1);
+            } else if (last == ')' && countChar(s, ')') > countChar(s, '(')) {
+                s = s.substring(0, s.length() - 1);
+            } else if (last == '>' && countChar(s, '>') > countChar(s, '<')) {
+                s = s.substring(0, s.length() - 1);
+            } else {
+                break;
+            }
+        }
+        return s;
+    }
+
+    private static int countChar(String s, char target) {
+        int count = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == target) count++;
+        }
+        return count;
     }
 
     private static String lineAround(String text, int start, int end) {

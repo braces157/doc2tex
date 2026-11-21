@@ -7,12 +7,14 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,8 +24,11 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReadParam;
+import javax.imageio.ImageReader;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.MemoryCacheImageOutputStream;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -159,15 +164,19 @@ class DocxCleanerService {
 
             try (ZipFile zip = new ZipFile(input.toFile());
                  ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(output))) {
+                CommentDiscovery commentDiscovery = options.stripComments()
+                        ? discoverCommentParts(zip)
+                        : new CommentDiscovery(Set.of(), Set.of());
                 var entries = zip.entries();
                 while (entries.hasMoreElements()) {
                     ZipEntry entry = entries.nextElement();
                     String name = entry.getName();
                     if (entry.isDirectory()) continue;
+                    String normalizedName = normalizePartPath(name);
                     if (options.stripMetadata() && (name.equals("docProps/custom.xml") || name.startsWith("docProps/thumbnail."))) {
                         continue;
                     }
-                    if (options.stripComments() && name.matches("word/comments.*\\.xml")) {
+                    if (options.stripComments() && commentDiscovery.commentParts().contains(normalizedName)) {
                         continue;
                     }
 
@@ -176,10 +185,10 @@ class DocxCleanerService {
                         bytes = scrubXmlText(bytes, SCRUB_CORE_TAGS);
                     } else if (options.stripMetadata() && name.equals("docProps/app.xml")) {
                         bytes = scrubXmlText(bytes, SCRUB_APP_TAGS);
-                    } else if (options.stripComments() && name.matches("word/(document|footnotes|endnotes)\\.xml")) {
+                    } else if (options.stripComments() && commentDiscovery.markerOwnerParts().contains(normalizedName)) {
                         bytes = stripCommentMarkers(bytes);
                     } else if ((options.stripComments() || options.stripMetadata()) && name.equals("[Content_Types].xml")) {
-                        bytes = stripContentTypeOverrides(bytes, options.stripComments(), options.stripMetadata());
+                        bytes = stripContentTypeOverrides(bytes, options.stripComments(), options.stripMetadata(), commentDiscovery.commentParts());
                     } else if (options.compressMedia() && name.startsWith("word/media/") && bytes.length >= MIN_OPTIMIZE_BYTES) {
                         byte[] compressed = compressMediaEntry(name, bytes, maxPx);
                         if (compressed.length < bytes.length) {
@@ -324,6 +333,100 @@ class DocxCleanerService {
         return serializeXml(doc);
     }
 
+    private static final long MAX_IMAGE_PIXELS = 40_000_000L;
+
+    private record CommentDiscovery(Set<String> commentParts, Set<String> markerOwnerParts) {}
+
+    private static CommentDiscovery discoverCommentParts(ZipFile zip) throws IOException {
+        Set<String> commentParts = new LinkedHashSet<>();
+        Set<String> markerOwners = new LinkedHashSet<>(List.of(
+                "word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/glossary/document.xml"));
+        var entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
+            if (entry.isDirectory()) continue;
+            String name = entry.getName();
+            String normalized = normalizePartPath(name);
+            if (normalized.matches("^(?:.*/)?comments[^/]*\\.xml$")) {
+                commentParts.add(normalized);
+            }
+            if (!name.endsWith(".rels")) continue;
+            byte[] relBytes = readEntryBounded(zip, entry, MAX_XML_BYTES);
+            Document doc = parseSecureXml(relBytes);
+            NodeList nodes = doc.getDocumentElement().getChildNodes();
+            String owner = ownerPartForRels(name);
+            String baseDir = baseDirForRels(name);
+            boolean ownerHasComments = false;
+            for (int i = 0; i < nodes.getLength(); i++) {
+                if (!(nodes.item(i) instanceof Element el)) continue;
+                if ("External".equalsIgnoreCase(el.getAttribute("TargetMode"))) continue;
+                String type = el.getAttribute("Type");
+                String target = el.getAttribute("Target");
+                if (isCommentRelationship(type, target)) {
+                    String resolved = resolveOpcTarget(baseDir, target);
+                    if (!resolved.isEmpty()) commentParts.add(resolved);
+                    ownerHasComments = true;
+                }
+            }
+            if (ownerHasComments && !owner.isEmpty()) {
+                markerOwners.add(owner);
+            }
+        }
+        return new CommentDiscovery(commentParts, markerOwners);
+    }
+
+    private static boolean isCommentRelationship(String type, String target) {
+        String lowerType = type == null ? "" : type.toLowerCase(Locale.ROOT);
+        String lowerTarget = target == null ? "" : target.toLowerCase(Locale.ROOT);
+        return lowerType.endsWith("/comments")
+                || lowerType.endsWith("/commentsextended")
+                || lowerType.endsWith("/commentsids")
+                || lowerType.endsWith("/commentsextensible")
+                || lowerTarget.matches("(?i)(?:^|.*/)comments[^/]*\\.xml$");
+    }
+
+    private static String normalizePartPath(String path) {
+        if (path == null) return "";
+        String cleaned = path.replace('\\', '/');
+        while (cleaned.startsWith("/")) cleaned = cleaned.substring(1);
+        return cleaned.toLowerCase(Locale.ROOT);
+    }
+
+    private static String baseDirForRels(String relsName) {
+        String normalized = relsName.replace('\\', '/');
+        int idx = normalized.lastIndexOf("/_rels/");
+        if (idx >= 0) return normalized.substring(0, idx + 1);
+        if (normalized.startsWith("_rels/")) return "";
+        int slash = normalized.lastIndexOf('/');
+        return slash >= 0 ? normalized.substring(0, slash + 1) : "";
+    }
+
+    private static String ownerPartForRels(String relsName) {
+        String normalized = relsName.replace('\\', '/');
+        if (normalized.equals("_rels/.rels")) return "";
+        int idx = normalized.lastIndexOf("/_rels/");
+        if (idx >= 0 && normalized.endsWith(".rels")) {
+            String dir = normalized.substring(0, idx + 1);
+            String file = normalized.substring(idx + "/_rels/".length(), normalized.length() - ".rels".length());
+            return normalizePartPath(dir + file);
+        }
+        return "";
+    }
+
+    private static String resolveOpcTarget(String baseDir, String target) {
+        if (target == null || target.isBlank()) return "";
+        String cleanTarget = target.replace('\\', '/').trim();
+        if (cleanTarget.startsWith("/")) return normalizePartPath(cleanTarget);
+        try {
+            URI base = URI.create("opc://pkg/" + baseDir);
+            URI resolved = base.resolve(cleanTarget).normalize();
+            String path = resolved.getPath();
+            return path == null ? "" : normalizePartPath(path);
+        } catch (IllegalArgumentException ignored) {
+            return normalizePartPath(baseDir + cleanTarget);
+        }
+    }
+
     private static byte[] stripCommentRelationships(byte[] bytes) throws IOException {
         Document doc = parseSecureXml(bytes);
         NodeList nodes = doc.getDocumentElement().getChildNodes();
@@ -331,14 +434,7 @@ class DocxCleanerService {
         for (int i = 0; i < nodes.getLength(); i++) {
             if (!(nodes.item(i) instanceof Element el)) continue;
             if ("External".equalsIgnoreCase(el.getAttribute("TargetMode"))) continue;
-            String type = el.getAttribute("Type").toLowerCase(Locale.ROOT);
-            String target = el.getAttribute("Target").toLowerCase(Locale.ROOT);
-            boolean isCommentType = type.endsWith("/comments")
-                    || type.endsWith("/commentsextended")
-                    || type.endsWith("/commentsids")
-                    || type.endsWith("/commentsextensible");
-            boolean isCommentPart = target.matches("(?i)(?:^|.*/)comments[^/]*\\.xml$");
-            if (isCommentType || isCommentPart) {
+            if (isCommentRelationship(el.getAttribute("Type"), el.getAttribute("Target"))) {
                 remove.add(el);
             }
         }
@@ -364,14 +460,17 @@ class DocxCleanerService {
         return serializeXml(doc);
     }
 
-    private static byte[] stripContentTypeOverrides(byte[] bytes, boolean comments, boolean metadata) throws IOException {
+    private static byte[] stripContentTypeOverrides(
+            byte[] bytes, boolean comments, boolean metadata, Set<String> commentParts) throws IOException {
         Document doc = parseSecureXml(bytes);
         NodeList nodes = doc.getDocumentElement().getChildNodes();
         List<Node> remove = new ArrayList<>();
         for (int i = 0; i < nodes.getLength(); i++) {
             if (!(nodes.item(i) instanceof Element el)) continue;
-            String part = el.getAttribute("PartName").toLowerCase(Locale.ROOT);
-            if ((comments && part.contains("/word/comments")) || (metadata && part.equals("/docprops/custom.xml"))) {
+            String rawPart = el.getAttribute("PartName");
+            String normalizedPart = normalizePartPath(rawPart);
+            if ((comments && (commentParts.contains(normalizedPart) || normalizedPart.matches("^(?:.*/)?comments[^/]*\\.xml$")))
+                    || (metadata && normalizedPart.equals("docprops/custom.xml"))) {
                 remove.add(el);
             }
         }
@@ -385,7 +484,7 @@ class DocxCleanerService {
         boolean png = lower.endsWith(".png");
         if (!jpeg && !png) return original;
         try {
-            BufferedImage src = ImageIO.read(new ByteArrayInputStream(original));
+            BufferedImage src = readBoundedImage(original, maxPx);
             if (src == null) return original;
             int w = src.getWidth();
             int h = src.getHeight();
@@ -432,6 +531,38 @@ class DocxCleanerService {
             return candidate.length > 0 && candidate.length < original.length ? candidate : original;
         } catch (IOException | RuntimeException ignored) {
             return original;
+        }
+    }
+
+    private static BufferedImage readBoundedImage(byte[] original, int maxPx) throws IOException {
+        try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(original))) {
+            if (iis == null) return null;
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
+            if (!readers.hasNext()) return null;
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(iis, true, true);
+                int w = reader.getWidth(0);
+                int h = reader.getHeight(0);
+                if (w <= 0 || h <= 0) return null;
+                long pixels = (long) w * h;
+                int longest = Math.max(w, h);
+                ImageReadParam param = reader.getDefaultReadParam();
+                int subsample = 1;
+                if (longest > maxPx * 2) {
+                    subsample = Math.max(1, (int) Math.floor((double) longest / (maxPx * 1.5)));
+                }
+                long decodedPixels = ((long) (w + subsample - 1) / subsample) * ((long) (h + subsample - 1) / subsample);
+                if (pixels > MAX_IMAGE_PIXELS || decodedPixels > MAX_IMAGE_PIXELS) {
+                    return null;
+                }
+                if (subsample > 1) {
+                    param.setSourceSubsampling(subsample, subsample, 0, 0);
+                }
+                return reader.read(0, param);
+            } finally {
+                reader.dispose();
+            }
         }
     }
 }

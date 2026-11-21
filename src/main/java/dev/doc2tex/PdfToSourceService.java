@@ -54,9 +54,10 @@ class PdfToSourceService {
             List<String> warnings,
             String content) {}
 
-    record PdfSourceDownload(String filename, String mediaType, byte[] bytes) {}
+    record PdfSourceDownload(String filename, String mediaType, byte[] bytes, List<String> warnings) {}
 
     private record ExtractedAsset(int page, String relativePath, byte[] pngBytes) {}
+    private record ImageExtraction(List<ExtractedAsset> assets, List<String> warnings) {}
     private record ConversionData(
             String baseName,
             int pageCount,
@@ -113,21 +114,24 @@ class PdfToSourceService {
                 case "markdown" -> new PdfSourceDownload(
                         PdfStudioService.sanitizeDownloadName(data.baseName() + ".md", "converted.md", ".md"),
                         "text/markdown;charset=UTF-8",
-                        data.markdown().getBytes(StandardCharsets.UTF_8));
+                        inlineAssetsAsDataUris(data.markdown(), data.assets()).getBytes(StandardCharsets.UTF_8),
+                        data.warnings());
                 case "latex-zip" -> {
                     String latex = convertMarkdownWithPandoc(data.markdown(), data.assets(), "latex", true);
                     byte[] zipBytes = buildLatexZip(data.baseName(), latex, data.assets(), data.warnings());
                     yield new PdfSourceDownload(
                             PdfStudioService.sanitizeDownloadName(data.baseName() + "-latex.zip", "latex-export.zip", ".zip"),
                             "application/zip",
-                            zipBytes);
+                            zipBytes,
+                            data.warnings());
                 }
                 case "docx" -> {
                     byte[] docxBytes = convertMarkdownToDocx(data.markdown(), data.assets());
                     yield new PdfSourceDownload(
                             PdfStudioService.sanitizeDownloadName(data.baseName() + ".docx", "converted.docx", ".docx"),
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            docxBytes);
+                            docxBytes,
+                            data.warnings());
                 }
                 default -> throw new ApiException(HttpStatus.BAD_REQUEST, "Unsupported target download format.");
             };
@@ -196,7 +200,9 @@ class PdfToSourceService {
             }
         }
 
-        List<ExtractedAsset> assets = extractImages(doc, limit);
+        ImageExtraction imageExtraction = extractImages(doc, limit);
+        List<ExtractedAsset> assets = imageExtraction.assets();
+        warnings.addAll(imageExtraction.warnings());
         Map<Integer, List<ExtractedAsset>> assetsByPage = new LinkedHashMap<>();
         for (ExtractedAsset asset : assets) {
             assetsByPage.computeIfAbsent(asset.page(), k -> new ArrayList<>()).add(asset);
@@ -382,36 +388,70 @@ class PdfToSourceService {
         }
     }
 
-    private static List<ExtractedAsset> extractImages(PDDocument doc, int pageLimit) throws IOException {
+    private static ImageExtraction extractImages(PDDocument doc, int pageLimit) throws IOException {
         Set<COSBase> seenObjs = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<COSObjectKey> seenKeys = new LinkedHashSet<>();
         List<ExtractedAsset> assets = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
         long totalBytes = 0;
         int figIndex = 0;
+        boolean imageLimitReached = false;
+        boolean byteLimitReached = false;
+        int oversizedSkipped = 0;
+        int decodeFailed = 0;
+        outer:
         for (int i = 0; i < pageLimit; i++) {
             List<PDImageXObject> pageImages = new ArrayList<>();
             PdfStudioExtractor.collectPageImages(doc.getPage(i).getResources(), 0,
                     Collections.newSetFromMap(new IdentityHashMap<>()), seenObjs, seenKeys, pageImages);
             for (PDImageXObject image : pageImages) {
-                if (assets.size() >= MAX_IMAGES) return assets;
-                if ((long) image.getWidth() * image.getHeight() > MAX_IMAGE_PIXELS) continue;
+                if (assets.size() >= MAX_IMAGES) {
+                    imageLimitReached = true;
+                    break outer;
+                }
+                if ((long) image.getWidth() * image.getHeight() > MAX_IMAGE_PIXELS) {
+                    oversizedSkipped++;
+                    continue;
+                }
                 BufferedImage buffered;
                 try {
                     buffered = image.getImage();
                 } catch (IOException | RuntimeException ignored) {
+                    decodeFailed++;
                     continue;
                 }
-                if (buffered == null) continue;
+                if (buffered == null) {
+                    decodeFailed++;
+                    continue;
+                }
                 ByteArrayOutputStream png = new ByteArrayOutputStream();
-                if (!ImageIO.write(buffered, "png", png)) continue;
+                if (!ImageIO.write(buffered, "png", png)) {
+                    decodeFailed++;
+                    continue;
+                }
                 byte[] bytes = png.toByteArray();
-                if (totalBytes + bytes.length > MAX_IMAGE_BYTES) return assets;
+                if (totalBytes + bytes.length > MAX_IMAGE_BYTES) {
+                    byteLimitReached = true;
+                    break outer;
+                }
                 totalBytes += bytes.length;
                 figIndex++;
                 assets.add(new ExtractedAsset(i + 1, String.format(Locale.ROOT, "media/fig-%03d.png", figIndex), bytes));
             }
         }
-        return assets;
+        if (imageLimitReached) {
+            warnings.add("Image extraction stopped after the " + MAX_IMAGES + "-figure limit; later figures were omitted.");
+        }
+        if (byteLimitReached) {
+            warnings.add("Image extraction stopped after reaching the 30 MB media budget; later figures were omitted.");
+        }
+        if (oversizedSkipped > 0) {
+            warnings.add("Skipped " + oversizedSkipped + " oversized image(s) exceeding the 40-megapixel safety limit.");
+        }
+        if (decodeFailed > 0) {
+            warnings.add("Skipped " + decodeFailed + " image(s) that could not be decoded cleanly.");
+        }
+        return new ImageExtraction(assets, warnings);
     }
 
     private static boolean flushHeading(StringBuilder md, int level, StringBuilder headingBuf) {

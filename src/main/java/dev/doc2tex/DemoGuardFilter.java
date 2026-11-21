@@ -78,7 +78,7 @@ class DemoGuardFilter extends OncePerRequestFilter {
                 return;
             }
 
-            if ("GET".equalsIgnoreCase(request.getMethod())
+            if (("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
                     && path.matches("^/api/jobs/[^/]+/export/[^/]+$")) {
                 if (!checkRateLimit(previews, clientIp(request), response,
                         "Demo export rate limit reached. Please wait a few minutes before exporting again.")) {

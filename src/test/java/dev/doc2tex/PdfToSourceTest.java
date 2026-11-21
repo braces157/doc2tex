@@ -7,9 +7,11 @@ import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -22,6 +24,7 @@ import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -146,6 +149,20 @@ class PdfToSourceTest {
                 .body(PdfToSourceService.PdfSourceResult.class);
         assertNotNull(texResult);
         assertTrue(texResult.content().contains("\\documentclass"), texResult.content());
+        assertTrue(texResult.content().contains("Left column opening paragraph"), texResult.content());
+        assertTrue(texResult.content().contains("Final summary paragraph on page two."), texResult.content());
+
+        var mdDlParts = new LinkedMultiValueMap<String, Object>();
+        mdDlParts.add("file", pdfPart("paper.pdf", pdf));
+        mdDlParts.add("targetFormat", "markdown");
+        String downloadedMd = client().post().uri("/api/pdf/to-source/download")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(mdDlParts)
+                .retrieve()
+                .body(String.class);
+        assertNotNull(downloadedMd);
+        assertTrue(downloadedMd.contains("data:image/png;base64,"), "Standalone Markdown download must inline extracted PNGs");
+        assertTrue(downloadedMd.contains("Final summary paragraph on page two."), downloadedMd);
 
         var zipParts = new LinkedMultiValueMap<String, Object>();
         zipParts.add("file", pdfPart("paper.pdf", pdf));
@@ -162,6 +179,8 @@ class PdfToSourceTest {
             while ((entry = zip.getNextEntry()) != null) entries.put(entry.getName(), zip.readAllBytes());
         }
         assertTrue(entries.containsKey("main.tex"));
+        String zipTex = new String(entries.get("main.tex"), StandardCharsets.UTF_8);
+        assertTrue(zipTex.contains("Left column opening paragraph") && zipTex.contains("Final summary paragraph on page two."), zipTex);
         assertTrue(entries.containsKey("media/fig-001.png"));
         assertTrue(entries.containsKey("README.txt"));
 
@@ -178,13 +197,19 @@ class PdfToSourceTest {
         Files.write(outDocx, docxBytes);
         docxValidator.validate(outDocx);
         boolean hasEmbeddedImage = false;
+        String docxDocumentXml = "";
         try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(docxBytes))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 if (entry.getName().startsWith("word/media/")) hasEmbeddedImage = true;
+                if (entry.getName().equals("word/document.xml")) {
+                    docxDocumentXml = new String(zis.readAllBytes(), StandardCharsets.UTF_8);
+                }
             }
         }
         assertTrue(hasEmbeddedImage, "DOCX exported from PDF under --sandbox must embed extracted media");
+        assertTrue(docxDocumentXml.contains("Left column opening paragraph"), docxDocumentXml);
+        assertTrue(docxDocumentXml.contains("Final summary paragraph on page two."), docxDocumentXml);
     }
 
     @Test
@@ -252,5 +277,58 @@ class PdfToSourceTest {
                 .body(PdfToSourceService.PdfSourceResult.class);
         assertNotNull(unlocked);
         assertEquals(2, unlocked.pageCount());
+    }
+
+    @Test
+    void preservesInteriorSpanningHeadingsNumericMarginBodyLinesAndImageLimitWarnings() throws Exception {
+        // 1. Interior full-width spanning heading splits two-column page into upper and lower bands.
+        List<PdfLayoutExtractor.TextLine> lines = List.of(
+                new PdfLayoutExtractor.TextLine(100, 60, 400, 16, 16, true, "Top Title", 0),
+                new PdfLayoutExtractor.TextLine(50, 140, 200, 10, 10, false, "Upper Left", 0),
+                new PdfLayoutExtractor.TextLine(330, 140, 200, 10, 10, false, "Upper Right", 0),
+                new PdfLayoutExtractor.TextLine(100, 260, 400, 14, 14, true, "Mid Spanning Section", 0),
+                new PdfLayoutExtractor.TextLine(50, 340, 200, 10, 10, false, "Lower Left", 0),
+                new PdfLayoutExtractor.TextLine(330, 340, 200, 10, 10, false, "Lower Right", 0));
+        List<String> orderedTexts = PdfLayoutExtractor.orderTwoColumns(lines, 612f)
+                .stream().map(PdfLayoutExtractor.TextLine::text).toList();
+        assertEquals(
+                List.of("Top Title", "Upper Left", "Upper Right", "Mid Spanning Section", "Lower Left", "Lower Right"),
+                orderedTexts);
+
+        // 2. Distinct numeric body values near top margin must NOT be stripped as repeated headers.
+        var page1 = new PdfLayoutExtractor.PageLines(1, 612f, 792f, List.of(
+                new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 10 mg", 0)));
+        var page2 = new PdfLayoutExtractor.PageLines(2, 612f, 792f, List.of(
+                new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 20 mg", 0)));
+        var repeated = PdfLayoutExtractor.detectRepeatedMargins(List.of(page1, page2));
+        assertTrue(repeated.isEmpty(), "Distinct numeric content must not be collapsed into a repeated margin: " + repeated);
+
+        // 3. More than 60 distinct small images must report an omission warning.
+        byte[] manyImagesPdf;
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage(PDRectangle.LETTER);
+            doc.addPage(page);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                for (int i = 0; i < 61; i++) {
+                    BufferedImage img = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+                    img.setRGB(0, 0, i * 1000 + 1);
+                    PDImageXObject ximg = LosslessFactory.createFromImage(doc, img);
+                    cs.drawImage(ximg, 20 + (i % 10) * 10, 700 - (i / 10) * 10, 4, 4);
+                }
+            }
+            doc.save(out);
+            manyImagesPdf = out.toByteArray();
+        }
+        var parts = new LinkedMultiValueMap<String, Object>();
+        parts.add("file", pdfPart("many-figs.pdf", manyImagesPdf));
+        parts.add("targetFormat", "markdown");
+        PdfToSourceService.PdfSourceResult manyRes = client().post().uri("/api/pdf/to-source")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(parts)
+                .retrieve()
+                .body(PdfToSourceService.PdfSourceResult.class);
+        assertNotNull(manyRes);
+        assertEquals(60, manyRes.imagesExtracted());
+        assertTrue(manyRes.warnings().stream().anyMatch(w -> w.contains("60-figure limit")), manyRes.warnings().toString());
     }
 }

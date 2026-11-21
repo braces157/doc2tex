@@ -73,8 +73,12 @@ class PdfDiffService {
             PDFTextStripper stripper = new PDFTextStripper();
 
             for (int p = 1; p <= compared; p++) {
-                List<String> leftLines = p <= leftPages ? extractPageLines(leftDoc, stripper, p) : List.of();
-                List<String> rightLines = p <= rightPages ? extractPageLines(rightDoc, stripper, p) : List.of();
+                List<String> fullLeft = p <= leftPages ? extractAllPageLines(leftDoc, stripper, p) : List.of();
+                List<String> fullRight = p <= rightPages ? extractAllPageLines(rightDoc, stripper, p) : List.of();
+                boolean pageTruncated = fullLeft.size() > MAX_LINES_PER_PAGE || fullRight.size() > MAX_LINES_PER_PAGE;
+                if (pageTruncated) truncated = true;
+                List<String> leftLines = fullLeft.size() > MAX_LINES_PER_PAGE ? fullLeft.subList(0, MAX_LINES_PER_PAGE) : fullLeft;
+                List<String> rightLines = fullRight.size() > MAX_LINES_PER_PAGE ? fullRight.subList(0, MAX_LINES_PER_PAGE) : fullRight;
                 List<DiffLine> diff = computeLineDiff(leftLines, rightLines);
                 int added = 0;
                 int removed = 0;
@@ -82,7 +86,14 @@ class PdfDiffService {
                     if (line.type().equals("add")) added++;
                     else if (line.type().equals("del")) removed++;
                 }
-                boolean identical = added == 0 && removed == 0 && p <= leftPages && p <= rightPages;
+                boolean fullEqual = p <= leftPages && p <= rightPages && fullLeft.equals(fullRight);
+                boolean identical = added == 0 && removed == 0 && fullEqual;
+                if (!identical && added == 0 && removed == 0) {
+                    // Differences exist past MAX_LINES_PER_PAGE; reflect at least one change past the display cap.
+                    int tailDiff = Math.max(1, Math.abs(fullRight.size() - fullLeft.size()));
+                    if (fullRight.size() >= fullLeft.size()) added += tailDiff;
+                    else removed += tailDiff;
+                }
                 if (identical) matching++;
                 else changed++;
                 totalAdded += added;
@@ -154,14 +165,13 @@ class PdfDiffService {
         }
     }
 
-    private static List<String> extractPageLines(PDDocument doc, PDFTextStripper stripper, int page) throws IOException {
+    private static List<String> extractAllPageLines(PDDocument doc, PDFTextStripper stripper, int page) throws IOException {
         stripper.setStartPage(page);
         stripper.setEndPage(page);
         String text = stripper.getText(doc).replace("\r\n", "\n").replace('\r', '\n');
         return Arrays.stream(text.split("\n"))
                 .map(String::trim)
                 .filter(line -> !line.isEmpty())
-                .limit(MAX_LINES_PER_PAGE)
                 .toList();
     }
 
@@ -199,10 +209,18 @@ class PdfDiffService {
     }
 
     private static BufferedImage renderPageBounded(PDDocument doc, int pageIndex) throws IOException {
-        PDRectangle box = PdfStudioStamper.visibleBox(doc.getPage(pageIndex));
-        float longestPt = Math.max(1f, Math.max(box.getWidth(), box.getHeight()));
+        var page = doc.getPage(pageIndex);
+        PDRectangle box = PdfStudioStamper.visibleBox(page);
+        float userUnit = page.getUserUnit() > 0f ? page.getUserUnit() : 1f;
+        float widthPt = Math.max(1f, box.getWidth() * userUnit);
+        float heightPt = Math.max(1f, box.getHeight() * userUnit);
+        float longestPt = Math.max(widthPt, heightPt);
         float dpi = Math.min(RENDER_DPI, 1800f * 72f / longestPt);
-        return new PDFRenderer(doc).renderImageWithDPI(pageIndex, Math.max(18f, dpi));
+        if (dpi < 0.5f) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Page " + (pageIndex + 1) + " dimensions exceed the visual diff rendering limit.");
+        }
+        return new PDFRenderer(doc).renderImageWithDPI(pageIndex, dpi);
     }
 
     private static BufferedImage normalizeCanvas(BufferedImage source, int width, int height) {

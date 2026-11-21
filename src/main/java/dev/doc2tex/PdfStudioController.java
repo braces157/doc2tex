@@ -89,7 +89,19 @@ class PdfStudioController {
             @RequestParam(defaultValue = "false") boolean aiLayout,
             @RequestParam(required = false) String password) throws IOException {
         PdfToSourceService.PdfSourceDownload dl = pdfToSource.downloadAs(file, targetFormat, aiLayout, password);
-        return attachment(dl.bytes(), dl.filename(), MediaType.parseMediaType(dl.mediaType()));
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(dl.filename(), StandardCharsets.UTF_8)
+                .build();
+        var builder = ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(dl.mediaType()))
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString());
+        if (dl.warnings() != null && !dl.warnings().isEmpty()) {
+            String headerWarn = String.join(" | ", dl.warnings()).replaceAll("[\\r\\n\\p{Cntrl}]+", " ").trim();
+            if (headerWarn.length() > 300) headerWarn = headerWarn.substring(0, 300) + "...";
+            builder.header("X-Doc2TeX-Warnings", headerWarn);
+        }
+        return builder.body(dl.bytes());
     }
 
     private static ResponseEntity<byte[]> attachment(byte[] bytes, String filename, MediaType mediaType) {

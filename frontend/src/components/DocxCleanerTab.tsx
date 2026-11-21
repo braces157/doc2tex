@@ -128,7 +128,7 @@ export function DocxCleanerTab({ busy, onBusyChange, onError }: DocxCleanerTabPr
             <h3>Cleaning actions</h3>
             <label className="pdf-check-row">
               <input type="checkbox" checked={stripMetadata} onChange={e => setStripMetadata(e.target.checked)} />
-              <span><strong>Scrub metadata &amp; custom properties</strong><small>Clears author, title, lastModifiedBy, company, custom XML, and thumbnails.</small></span>
+              <span><strong>Scrub metadata &amp; custom properties</strong><small>Clears author, title, lastModifiedBy, company, custom properties, and thumbnails.</small></span>
             </label>
             <label className="pdf-check-row">
               <input type="checkbox" checked={stripComments} onChange={e => setStripComments(e.target.checked)} />

@@ -34,6 +34,7 @@ export function TemplatesAndRefsTab({ busy, tectonicReady, onBusyChange, onError
   const [refText, setRefText] = useState('')
   const [refReport, setRefReport] = useState<ExtractionReport | null>(null)
   const [copiedBib, setCopiedBib] = useState(false)
+  const refGenRef = useRef(0)
 
   useEffect(() => {
     void fetchTemplates().then(list => setTemplates(list)).catch(() => { /* fallback handled by UI */ })
@@ -81,17 +82,32 @@ export function TemplatesAndRefsTab({ busy, tectonicReady, onBusyChange, onError
     }
   }
 
+  const updateRefFile = (next: File | null) => {
+    refGenRef.current += 1
+    setRefFile(next)
+    setRefReport(null)
+  }
+
+  const updateRefText = (next: string) => {
+    refGenRef.current += 1
+    setRefText(next)
+    setRefReport(null)
+  }
+
   const runExtractRefs = async () => {
+    const gen = ++refGenRef.current
     onError('')
     onBusyChange('Scanning text for DOIs, arXiv IDs, ISBNs, and references…')
     try {
       const report = await extractReferences(refFile, refText)
+      if (refGenRef.current !== gen) return
       setRefReport(report)
       toast.success(`Found ${report.totalFound} citation candidate${report.totalFound === 1 ? '' : 's'}`)
     } catch (failure) {
+      if (refGenRef.current !== gen) return
       onError(failure instanceof Error ? failure.message : 'Reference extraction failed.')
     } finally {
-      onBusyChange('')
+      if (refGenRef.current === gen) onBusyChange('')
     }
   }
 
@@ -236,7 +252,7 @@ export function TemplatesAndRefsTab({ busy, tectonicReady, onBusyChange, onError
           aria-label="Upload paper for reference extraction"
           accept=".pdf,.docx,.txt,.md,.tex,.bib"
           onChange={event => {
-            setRefFile(event.target.files?.[0] ?? null)
+            updateRefFile(event.target.files?.[0] ?? null)
             event.target.value = ''
           }}
         />
@@ -253,7 +269,7 @@ export function TemplatesAndRefsTab({ busy, tectonicReady, onBusyChange, onError
             {refFile ? `File: ${refFile.name}` : 'Attach PDF / DOCX / TXT'}
           </Button>
           {refFile && (
-            <Button variant="ghost" size="sm" onClick={() => setRefFile(null)}>Clear file</Button>
+            <Button variant="ghost" size="sm" onClick={() => updateRefFile(null)}>Clear file</Button>
           )}
         </div>
 
@@ -265,7 +281,7 @@ export function TemplatesAndRefsTab({ busy, tectonicReady, onBusyChange, onError
             className="eco-small-textarea"
             placeholder="Paste DOIs (e.g. 10.1145/...), arXiv:2401.12345, ISBNs, or numbered references..."
             value={refText}
-            onChange={e => setRefText(e.target.value)}
+            onChange={e => updateRefText(e.target.value)}
           />
         </div>
 
@@ -298,6 +314,9 @@ export function TemplatesAndRefsTab({ busy, tectonicReady, onBusyChange, onError
                 </div>
               )}
             </div>
+            {refReport.bibtex && refReport.warnings.length > 0 && (
+              <p className="eco-hint" role="status">{refReport.warnings.join(' ')}</p>
+            )}
             <textarea
               readOnly
               aria-label="Extracted BibTeX output"

@@ -273,22 +273,23 @@ final class PdfLayoutExtractor {
         rightCol.sort(byY);
         spanning.sort(byY);
 
-        float colTopY = Float.MAX_VALUE;
-        if (!leftCol.isEmpty()) colTopY = Math.min(colTopY, leftCol.get(0).y());
-        if (!rightCol.isEmpty()) colTopY = Math.min(colTopY, rightCol.get(0).y());
-
-        List<TextLine> topFull = new ArrayList<>();
-        List<TextLine> bottomFull = new ArrayList<>();
-        for (TextLine line : spanning) {
-            if (line.y() < colTopY - 4f) topFull.add(line);
-            else bottomFull.add(line);
-        }
-
+        // Partition the page into vertical bands around full-width spanning lines (titles, interior section headings, footers)
+        // so each band emits its left column then right column before the next spanning heading starts.
         List<TextLine> combined = new ArrayList<>(lines.size());
-        combined.addAll(topFull);
-        combined.addAll(leftCol);
-        combined.addAll(rightCol);
-        combined.addAll(bottomFull);
+        int li = 0;
+        int ri = 0;
+        for (TextLine span : spanning) {
+            float cutY = span.y() - 2f;
+            while (li < leftCol.size() && leftCol.get(li).y() < cutY) {
+                combined.add(leftCol.get(li++));
+            }
+            while (ri < rightCol.size() && rightCol.get(ri).y() < cutY) {
+                combined.add(rightCol.get(ri++));
+            }
+            combined.add(span);
+        }
+        while (li < leftCol.size()) combined.add(leftCol.get(li++));
+        while (ri < rightCol.size()) combined.add(rightCol.get(ri++));
         return combined;
     }
 
@@ -359,7 +360,19 @@ final class PdfLayoutExtractor {
         return count;
     }
 
+    private static final Pattern PURE_PAGE_NUMBER = Pattern.compile("^[-–—|•·\\s]*\\d{1,5}[-–—|•·\\s]*$");
+    private static final Pattern EXPLICIT_PAGE_NUMBER = Pattern.compile("(?i)\\b(page|p\\.|pp\\.)\\s*\\d{1,5}(?:\\s*(?:of|/)\\s*\\d{1,5})?\\b");
+    private static final Pattern LEADING_HEADER_PAGE_NUM = Pattern.compile("^\\d{1,4}(?=(?:\\s*[-–—|•·]\\s*|\\s+)[A-Za-z])");
+    private static final Pattern TRAILING_HEADER_PAGE_NUM = Pattern.compile("(?<![:=$€£¥±<>~\\d])(?:\\s*[-–—|•·]\\s*|\\s+)\\d{1,4}$");
+
     private static String normalizeMarginKey(String text) {
-        return text.replaceAll("\\d+", "#").trim().toLowerCase(Locale.ROOT);
+        String trimmed = text.trim();
+        if (PURE_PAGE_NUMBER.matcher(trimmed).matches()) {
+            return "#";
+        }
+        String normalized = EXPLICIT_PAGE_NUMBER.matcher(trimmed).replaceAll("$1 #");
+        normalized = LEADING_HEADER_PAGE_NUM.matcher(normalized).replaceFirst("#");
+        normalized = TRAILING_HEADER_PAGE_NUM.matcher(normalized).replaceFirst(" #");
+        return normalized.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
     }
 }

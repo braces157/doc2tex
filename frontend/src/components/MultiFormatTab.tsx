@@ -23,7 +23,7 @@ export function MultiFormatTab({ catalog, busy, onBusyChange, onError }: MultiFo
   const [copied, setCopied] = useState(false)
 
   const selectFile = (next: File | undefined) => {
-    if (!next) return
+    if (!next || busy) return
     onError('')
     if (next.size === 0 || next.size > 20 * 1024 * 1024) {
       onError('Choose a non-empty document up to 20 MB.')

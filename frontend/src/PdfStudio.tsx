@@ -44,6 +44,8 @@ function makePages(doc: LoadedPdf, inspection: PdfInspection): OrganizerPage[] {
 export default function PdfStudio({ history }: { history: Job[] }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const docsRef = useRef<LoadedPdf[]>([])
+  const inspectionTokensRef = useRef<Map<string, number>>(new Map())
+  const inspectionSeqRef = useRef(0)
   const [docs, setDocs] = useState<LoadedPdf[]>([])
   const [pages, setPages] = useState<OrganizerPage[]>([])
   const [tab, setTab] = useState<'organize' | 'inspect' | 'extract' | 'convert'>('organize')
@@ -86,10 +88,13 @@ export default function PdfStudio({ history }: { history: Job[] }) {
   )
 
   const inspectEntry = async (entry: LoadedPdf, password?: string) => {
+    const token = ++inspectionSeqRef.current
+    inspectionTokensRef.current.set(entry.uid, token)
     setDocs(prev => prev.map(item =>
       item.uid === entry.uid ? { ...item, loading: true, error: '', needsPassword: false } : item))
     try {
       const inspection = await inspectPdf(entry.file, password)
+      if (inspectionTokensRef.current.get(entry.uid) !== token) return
       setDocs(prev => prev.map(item =>
         item.uid === entry.uid
           ? { ...item, loading: false, password, inspection, needsPassword: false, error: '' }
@@ -99,6 +104,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
         ...makePages(entry, inspection),
       ])
     } catch (failure) {
+      if (inspectionTokensRef.current.get(entry.uid) !== token) return
       const message = failure instanceof Error ? failure.message : 'Could not inspect this PDF.'
       const needsPassword = message.toLowerCase().includes('password')
       setDocs(prev => prev.map(item =>
@@ -164,6 +170,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
   }
 
   const removeDoc = (uid: string) => {
+    inspectionTokensRef.current.delete(uid)
     const target = docs.find(item => item.uid === uid)
     if (target) releasePdfProxy(target.file)
     setDocs(prev => prev.filter(item => item.uid !== uid))
@@ -175,6 +182,7 @@ export default function PdfStudio({ history }: { history: Job[] }) {
   }
 
   const clearAll = () => {
+    inspectionTokensRef.current.clear()
     for (const doc of docs) releasePdfProxy(doc.file)
     setDocs([])
     setPages([])
@@ -238,13 +246,21 @@ export default function PdfStudio({ history }: { history: Job[] }) {
     const passwordsToSend = pageSpecsOverride
       ? (pageSpecsOverride.passwords ?? [])
       : readyDocs.map(item => item.password ?? '')
-    const specs = pageSpecsOverride
-      ? pageSpecsOverride.specs
-      : pages.map(page => ({
-          fileIndex: docIndexByUid.get(page.docUid) ?? 0,
-          pageNumber: page.pageNumber,
-          rotation: page.rotation,
-        }))
+    let specs: { fileIndex: number; pageNumber: number; rotation: number }[]
+    if (pageSpecsOverride) {
+      specs = pageSpecsOverride.specs
+    } else {
+      const missingDoc = pages.some(page => !docIndexByUid.has(page.docUid))
+      if (missingDoc) {
+        setError('One or more queued pages belong to a removed or uninspected PDF. Remove stale pages or reset the order before exporting.')
+        return
+      }
+      specs = pages.map(page => ({
+        fileIndex: docIndexByUid.get(page.docUid)!,
+        pageNumber: page.pageNumber,
+        rotation: page.rotation,
+      }))
+    }
     if (specs.length === 0 || specs.length > MAX_OUTPUT_PAGES) {
       setError(`Choose between 1 and ${MAX_OUTPUT_PAGES} pages to export.`)
       return
