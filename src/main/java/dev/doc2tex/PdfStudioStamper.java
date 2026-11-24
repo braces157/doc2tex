@@ -131,7 +131,6 @@ final class PdfStudioStamper {
                     unicode.encode(text);
                     return unicode;
                 } catch (IllegalArgumentException ignored) {
-                    // Fall through to standard error below.
                 }
             }
             throw new ApiException(HttpStatus.BAD_REQUEST,

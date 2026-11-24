@@ -242,7 +242,6 @@ class CompareAndCleanTest {
         assertNotNull(page2);
         assertTrue(page2.pixelDiffRatio() > 0.0);
 
-        // Failure-path coverage: page=0, malformed PDF, malformed DOCX.
         var badPageErr = assertThrows(org.springframework.web.client.HttpClientErrorException.class, () ->
                 client().post().uri("/api/diff/pdf/page?page=0")
                         .contentType(MediaType.MULTIPART_FORM_DATA)

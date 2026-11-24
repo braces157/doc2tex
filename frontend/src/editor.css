@@ -6,7 +6,6 @@
 .icon-button:hover:not(:disabled) { background:var(--surface-sunken); color:var(--foreground); }
 .eyebrow { font:600 11px var(--font-sans); letter-spacing:.06em; text-transform:uppercase; }
 
-/* Editor shell */
 .editor-shell { border:1px solid var(--border); background:var(--background); border-radius:10px; overflow:hidden; box-shadow:var(--shadow-sm); }
 .editor-toolbar { height:44px; display:flex; justify-content:space-between; align-items:stretch; padding:0 12px; background:var(--background); border-bottom:1px solid var(--border); }
 .editor-view-actions { display:flex; align-items:center; gap:2px; }
@@ -20,7 +19,6 @@
 .status-dot.ready { background:var(--success); }
 .statusbar-separator { padding:0 6px; color:var(--border-strong); }
 
-/* Empty example output */
 .example-output { height:560px; padding:22px 0; overflow:hidden; background:var(--background); }
 .example-caption { display:flex; align-items:center; gap:8px; padding:0 22px 16px; font:600 11px var(--font-sans); letter-spacing:.06em; text-transform:uppercase; color:var(--muted-foreground); }
 .example-caption > span { width:6px; height:6px; border-radius:2px; background:var(--border-strong); }
@@ -36,7 +34,6 @@
 .example-note strong { font-weight:550; color:var(--foreground); }
 .note-line { width:40px; height:1px; background:var(--border); }
 
-/* Legacy textarea editor */
 .source-editor { height:560px; display:flex; overflow:hidden; }
 .line-numbers { width:48px; flex-shrink:0; padding:20px 11px 20px 0; overflow:hidden; text-align:right; background:var(--surface); font:12px/24px var(--font-mono); color:var(--faint); user-select:none; }
 .line-numbers span { display:block; height:24px; }
@@ -44,7 +41,6 @@
 .source-editor textarea:focus-visible { outline:0; box-shadow:inset 0 0 0 2px var(--ring); }
 .source-editor textarea:disabled { background:var(--surface); opacity:.7; }
 
-/* Loading */
 .editor-loading { height:560px; padding:24px 22px; }
 .loading-caption { margin-bottom:24px; font-size:13px; color:var(--muted-foreground); }
 .skeleton-row { display:flex; align-items:center; gap:20px; height:26px; }
@@ -52,7 +48,6 @@
 .skeleton-row > i { height:9px; border-radius:3px; background:var(--surface-sunken); animation:breathe 1.8s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity:.4; } }
 
-/* PDF empty + viewer */
 .preview-empty { height:560px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:0; padding:32px; text-align:center; background:var(--surface); }
 .preview-empty > svg { color:var(--danger); margin-bottom:10px; }
 .preview-page { display:grid; place-items:center; width:64px; height:80px; margin-bottom:20px; border:1px solid var(--border); border-radius:6px; background:var(--background); color:var(--faint); box-shadow:var(--shadow-md); }
@@ -77,7 +72,6 @@
 .pdf-error { padding:80px 24px; text-align:center; font-size:13px; line-height:1.6; color:var(--muted-foreground); }
 .pdf-error svg { margin:auto; }
 
-/* Draft recovery */
 .draft-recovery { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--warning-border); background:var(--warning-soft); color:var(--foreground); }
 .draft-recovery strong { font-size:13px; font-weight:600; color:#92400e; }
 .draft-recovery p { max-width:60ch; margin-top:2px; font-size:12.5px; line-height:1.55; color:#92400e; }
@@ -85,7 +79,6 @@
 .draft-recovery-actions button { height:30px; font-size:12.5px; }
 .draft-storage-error { padding:10px 14px; font-size:12.5px; line-height:1.55; color:var(--danger); background:var(--danger-soft); border-bottom:1px solid var(--danger-border); }
 
-/* Compiler diagnostics */
 .compiler-diagnostics { max-height:360px; overflow:auto; margin:12px 0; padding:14px 16px; border:1px solid var(--border); border-radius:10px; background:var(--background); box-shadow:var(--shadow-xs); font-size:13px; color:var(--foreground); }
 .compiler-diagnostics h3 { margin:0 0 6px; font-size:14px; font-weight:600; }
 .compiler-diagnostics p { margin:6px 0; line-height:1.6; color:var(--subtle); }
@@ -101,7 +94,6 @@
 .diagnostic-severity.error { color:var(--danger); }
 .diagnostics-stale { color:var(--warning); }
 
-/* Original text comparison + guided review */
 .ui-review-comparison { min-width:0; max-width:100%; }
 .ui-review-comparison.has-original { display:grid; grid-template-columns:minmax(160px,.55fr) minmax(0,1fr); gap:12px; align-items:start; }
 .ui-review-editor { min-width:0; max-width:100%; }
@@ -122,7 +114,6 @@
 .review-decision-status { font-weight:600; }
 .guided-review-list > p { margin:14px 0; font-size:12.5px; line-height:1.55; color:var(--subtle); }
 
-/* Caption repairs */
 .caption-repairs-dialog { width:calc(100% - 32px); max-width:920px; max-height:90dvh; overflow:auto; font-size:13px; }
 .caption-repairs-dialog p, .caption-repairs-dialog li { line-height:1.6; }
 .caption-repairs-dialog ul { margin:10px 0; padding-left:20px; list-style:disc; }
@@ -135,12 +126,10 @@
 .caption-repair-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
 .caption-repair-actions button { font-size:13px; }
 
-/* Focus mode */
 .ui-workbench.is-editor-focused { grid-template-columns:minmax(0,1fr); }
 .ui-workbench.is-editor-focused > .ui-input-panel { display:none; }
 .is-editor-focused .latex-editor-shell { height:clamp(640px,calc(100dvh - 230px),1200px); }
 
-/* CodeMirror LaTeX editor */
 .latex-editor-shell { height:clamp(460px,calc(100dvh - 300px),780px); display:flex; flex-direction:column; min-width:0; background:var(--background); }
 .latex-editor-filebar { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px 6px 14px; border-bottom:1px solid var(--border); background:var(--surface); }
 .latex-editor-filebar > span { display:flex; align-items:center; gap:8px; font:12.5px var(--font-mono); color:var(--muted-foreground); }
@@ -194,7 +183,6 @@
 .latex-editor-host .cm-content[aria-disabled=true] { opacity:.65; }
 .shortcut-hint { margin-left:6px; padding:1px 5px; border:1px solid currentColor; border-radius:4px; font:500 10.5px var(--font-mono); opacity:.55; white-space:nowrap; }
 
-/* Layout options (disclosure) */
 .ui-layout-options { margin-top:16px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:var(--background); }
 .ui-layout-options > summary { display:flex; align-items:center; gap:8px; padding:9px 12px; font-weight:550; cursor:pointer; list-style:none; user-select:none; }
 .ui-layout-options > summary::-webkit-details-marker { display:none; }
@@ -214,7 +202,6 @@
 .ui-layout-hint { margin:0; font-size:12px; line-height:1.55; color:var(--muted-foreground); }
 .ui-layout-fields :is(input,select):disabled { opacity:.55; cursor:not-allowed; }
 
-/* Bibliography (disclosure) */
 .ui-bibliography { margin-top:12px; border:1px solid var(--border); border-radius:10px; background:var(--background); box-shadow:var(--shadow-xs); font-size:13px; }
 .ui-bibliography > summary { display:flex; align-items:center; gap:8px; padding:11px 14px; font-weight:600; cursor:pointer; list-style:none; user-select:none; }
 .ui-bibliography > summary::-webkit-details-marker { display:none; }

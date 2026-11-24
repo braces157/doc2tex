@@ -293,7 +293,6 @@ class ReferenceExtractorService {
         int left = text.lastIndexOf('\n', start);
         int right = text.indexOf('\n', end);
         String line = text.substring(left < 0 ? 0 : left + 1, right < 0 ? text.length() : right).trim();
-        // If the matched line is a wrapped continuation (e.g. starts with "arXiv:" or lowercase), prepend the prior line.
         if (left > 0 && (line.length() < 45 || line.toLowerCase(Locale.ROOT).startsWith("arxiv:")
                 || line.toLowerCase(Locale.ROOT).startsWith("preprint ") || Character.isLowerCase(line.charAt(0)))) {
             int prevLeft = text.lastIndexOf('\n', left - 1);

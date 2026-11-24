@@ -285,7 +285,6 @@ test('PDF Studio discards queued and pending inspections after removing a file o
   await expect.poll(() => alphaCalls).toBe(1)
   await expect(page.getByRole('heading', { name: 'Loaded PDFs (2)', exact: true })).toBeVisible()
 
-  // Remove queued beta.pdf while alpha.pdf inspection is still pending.
   await page.getByRole('button', { name: 'Remove beta.pdf', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Loaded PDFs (1)', exact: true })).toBeVisible()
 
@@ -294,7 +293,6 @@ test('PDF Studio discards queued and pending inspections after removing a file o
   await expect(pageCards).toHaveCount(2)
   expect(betaCalls).toBe(0)
 
-  // Now upload a fresh pair and Clear all while alpha inspection is in flight.
   await page.locator('input[aria-label="Upload PDF files"]').setInputFiles([
     { name: 'alpha.pdf', mimeType: 'application/pdf', buffer: PDF_BYTES },
     { name: 'beta.pdf', mimeType: 'application/pdf', buffer: PDF_BYTES },

@@ -62,7 +62,6 @@ function Export-Job([string]$Id, [string]$Name) {
 }
 try {
     $env:DOC2TEX_HOME = $taskHome
-    # Neither Java nor Node is discoverable by the launched processes.
     $env:PATH = Join-Path $env:SystemRoot 'System32'
     Assert-That (-not (Get-Command java,node,npm -ErrorAction SilentlyContinue)) 'Developer runtime leaked into the smoke PATH.'
     Run-Helper 'Launch.ps1' @('-NoBrowser')

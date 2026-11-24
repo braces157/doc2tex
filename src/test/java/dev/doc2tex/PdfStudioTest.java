@@ -479,7 +479,6 @@ class PdfStudioTest {
             parentPages.setItem(COSName.RESOURCES, leafRes);
             page.getCOSObject().removeItem(COSName.RESOURCES);
 
-            // Attach page-level XMP metadata AND deeply nested (10-level) Form XObject resource XMP metadata.
             PDMetadata pageMeta = new PDMetadata(doc);
             pageMeta.importXMPMetadata("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">AuthorSecretXmp</x:xmpmeta>"
                     .getBytes(StandardCharsets.UTF_8));
@@ -507,7 +506,6 @@ class PdfStudioTest {
             sourcePdf = out.toByteArray();
         }
 
-        // 1. Scrub enabled: text via inherited resources survives, page-level & deep resource XMP are stripped.
         var scrubbedParts = new LinkedMultiValueMap<String, Object>();
         scrubbedParts.add("files", pdfPart("inherited.pdf", sourcePdf));
         scrubbedParts.add("plan", JSON.writeValueAsString(new AssemblePlan(
@@ -528,7 +526,6 @@ class PdfStudioTest {
                     "Deeply nested Form XObject /Metadata must be scrubbed when scrubMetadata=true");
         }
 
-        // 2. Scrub disabled: page-level & deep nested resource XMP are preserved.
         var keepParts = new LinkedMultiValueMap<String, Object>();
         keepParts.add("files", pdfPart("inherited.pdf", sourcePdf));
         keepParts.add("plan", JSON.writeValueAsString(new AssemblePlan(

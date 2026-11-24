@@ -31,7 +31,6 @@ final class Ooxml {
         return isWord(namespace) ? namespace : null;
     }
 
-    /** Returns the matching Office Math namespace for a WordprocessingML namespace. */
     static String mathNamespace(String wordNamespace) {
         return W_STRICT.equals(wordNamespace) ? M_STRICT : M_TRANSITIONAL;
     }
