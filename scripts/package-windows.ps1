@@ -52,7 +52,6 @@ try {
     $taskExtract = Join-Path $taskDestination 'runtime-extract'; Expand-Archive -LiteralPath $taskRuntimeZip -DestinationPath $taskExtract
     $taskRuntimeRoot = @(Get-ChildItem -LiteralPath $taskExtract -Directory)
     if ($taskRuntimeRoot.Count -ne 1) { throw 'Unexpected runtime archive structure.' }
-    # Rename only the verified archive's one root inside this newly created package.
     $taskResolvedRuntime = [IO.Path]::GetFullPath($taskRuntimeRoot[0].FullName)
     if (-not $taskResolvedRuntime.StartsWith([IO.Path]::GetFullPath($taskDestination).TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Runtime path escaped the package.' }
     Move-Item -LiteralPath $taskResolvedRuntime -Destination (Join-Path $taskDestination 'runtime')

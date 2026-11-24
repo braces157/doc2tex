@@ -281,7 +281,6 @@ class PdfToSourceTest {
 
     @Test
     void preservesInteriorSpanningHeadingsNumericMarginBodyLinesAndImageLimitWarnings() throws Exception {
-        // 1. Interior full-width spanning heading splits two-column page into upper and lower bands.
         List<PdfLayoutExtractor.TextLine> lines = List.of(
                 new PdfLayoutExtractor.TextLine(100, 60, 400, 16, 16, true, "Top Title", 0),
                 new PdfLayoutExtractor.TextLine(50, 140, 200, 10, 10, false, "Upper Left", 0),
@@ -295,7 +294,6 @@ class PdfToSourceTest {
                 List.of("Top Title", "Upper Left", "Upper Right", "Mid Spanning Section", "Lower Left", "Lower Right"),
                 orderedTexts);
 
-        // 2. Distinct numeric body values near top margin (both "Result: 10 mg" and leading "10 mg") must NOT be stripped.
         var page1 = new PdfLayoutExtractor.PageLines(1, 612f, 792f, List.of(
                 new PdfLayoutExtractor.TextLine(72, 40, 120, 10, 10, false, "Result: 10 mg", 0),
                 new PdfLayoutExtractor.TextLine(72, 54, 60, 10, 10, false, "10 mg", 0),
@@ -308,7 +306,6 @@ class PdfToSourceTest {
         assertEquals(java.util.Set.of("# | chapter title"), repeated,
                 "Only genuine running headers/page numbers should collapse, never distinct numeric body lines");
 
-        // 3. More than 60 distinct small images + repeated headers must report omission warnings in both preview and DOCX download header.
         byte[] manyImagesPdf;
         try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             PDType1Font regular = new PDType1Font(Standard14Fonts.FontName.HELVETICA);

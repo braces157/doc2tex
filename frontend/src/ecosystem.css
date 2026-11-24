@@ -1,4 +1,3 @@
-/* ---------- 2x2 Studio Mode Switcher ---------- */
 .ui-studio-nav { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:3px; }
 .ui-studio-nav button { min-width:0; height:30px; font-size:10.5px; letter-spacing:-0.015em; padding:0 4px; gap:3px; justify-content:flex-start; overflow:hidden; text-overflow:ellipsis; }
 .ui-studio-nav button svg { flex-shrink:0; }
@@ -8,7 +7,6 @@
   .ui-mobile-studio-nav button { height:30px; font-size:12px; }
 }
 
-/* ---------- Ecosystem Shared Layouts ---------- */
 .eco-stack { display:flex; flex-direction:column; gap:14px; min-width:0; }
 .eco-two-col { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; }
 .eco-compact-drop { min-height:240px; }
@@ -34,7 +32,6 @@
 .eco-file-row strong { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .eco-file-row small { font-size:11.5px; color:var(--muted-foreground); }
 
-/* ---------- Diff & Visual Overlay ---------- */
 .ui-version-mode-bar { display:flex; gap:6px; margin-bottom:4px; }
 .eco-page-pills { display:flex; gap:6px; flex-wrap:wrap; }
 .eco-page-pill { padding:5px 10px; border:1px solid var(--border); border-radius:999px; background:var(--background); font:500 12px var(--font-mono); color:var(--subtle); }

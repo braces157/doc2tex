@@ -59,7 +59,6 @@ test('all 65 documents are paginated and an older filename opens and restores ou
   await expect(dialog.getByRole('status')).toHaveText('1 document found')
   expect(state.requests.at(-1)?.searchParams.get('page')).toBe('0')
   await page.screenshot({ path: testInfo.outputPath('library-search.png'), fullPage: true })
-  // Open a document by keyboard using its named button.
   await dialog.getByRole('button', { name: /Open older-résumé.docx/ }).focus()
   await page.keyboard.press('Enter')
   await expect(editor(page)).toHaveText(source(jobs[0].id), { useInnerText: true })
